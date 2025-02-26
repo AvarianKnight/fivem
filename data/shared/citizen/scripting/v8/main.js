@@ -46,10 +46,14 @@ const EXT_LOCALFUNCREF = 11;
 	const packrOptions = {
 		// use "std::map" for the underlying msgpack type for compatibility
 		useRecords: false,
-		// allow Map, Set, and Error to be serialized
-		moreTypes: true,
+		// do now allow Map, Set, and Error to be serialized (rdr3/protobuf compatibility)
+		moreTypes: false,
 		// keep compatibility Lua/C#
 		encodeUndefinedAsNil: true,
+		// copy the buffer rather than providing a slice/view of the buffer (rdr3/protobuf compatibility)
+		copyBuffers: true, 
+		// don't throw an error when an invalid date is provided (msgpack-lite compatibility)
+		onInvalidDate: true,
 	}
 
 	/** @type {import("./msgpack").Packr} */
@@ -91,6 +95,8 @@ const EXT_LOCALFUNCREF = 11;
 
 		return Citizen.canonicalizeRef(ref);
 	};
+
+	const Buffer = global.Buffer;
 
 	function refFunctionPacker(refFunction) {
 		return Buffer.from(Citizen.makeRefFunction(refFunction));
