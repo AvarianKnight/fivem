@@ -92,6 +92,8 @@ const EXT_LOCALFUNCREF = 11;
 		return Citizen.canonicalizeRef(ref);
 	};
 
+	const Buffer = global.Buffer;
+
 	function refFunctionPacker(refFunction) {
 		return Buffer.from(Citizen.makeRefFunction(refFunction));
 	}
