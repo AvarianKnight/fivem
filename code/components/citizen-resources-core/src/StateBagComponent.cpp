@@ -10,6 +10,7 @@
 #include <EASTL/fixed_vector.h>
 
 #include <SharedFunction.h>
+#include <oneapi/tbb/concurrent_unordered_map.h>
 #include <state/RlMessageBuffer.h>
 
 #include "ByteWriter.h"
@@ -26,8 +27,6 @@ public:
 	virtual ~StateBagComponentImpl() override = default;
 
 	virtual void AttachToObject(fx::ResourceManager* object) override;
-
-	virtual void Reset() override;
 
 	virtual void HandlePacket(int source, std::string_view data, std::string* outBagNameName = nullptr) override;
 
@@ -62,12 +61,9 @@ public:
 
 	void QueueSend(int target, net::packet::StateBagV2Packet& packet);
 
-	inline std::tuple<std::shared_lock<std::shared_mutex>, std::reference_wrapper<const std::unordered_set<int>>> GetTargets()
+	inline std::reference_wrapper<const std::unordered_set<int>> GetTargets()
 	{
-		return {
-			std::shared_lock{ m_mapMutex },
-			std::reference_wrapper{ m_targets }
-		};
+		return std::reference_wrapper{ m_targets };
 	}
 
 	/// <summary>
@@ -91,22 +87,15 @@ private:
 
 	std::unordered_set<int> m_targets;
 
-	std::unordered_set<std::string> m_erasureList;
-	std::shared_mutex m_erasureMutex;
-
-	// TODO: evaluate transparent usage when we switch to C++20 compiler modes
-	std::unordered_map<std::string, std::weak_ptr<StateBagImpl>> m_stateBags;
-	std::shared_mutex m_mapMutex;
+	tbb::concurrent_unordered_map<std::string, std::weak_ptr<StateBagImpl>> m_stateBags;
 
 	// pre-created state bag stuff
 
 	// list of state bag prefixes
-	std::vector<std::pair<std::string, bool>> m_preCreatePrefixes;
-	std::shared_mutex m_preCreatePrefixMutex;
+	tbb::concurrent_unordered_map<std::string, bool> m_preCreatePrefixes;
 
 	// *owning* pointers for pre-created bags
-	std::set<std::shared_ptr<StateBagImpl>> m_preCreatedStateBags;
-	std::shared_mutex m_preCreatedStateBagsMutex;
+	tbb::concurrent_unordered_map<std::string, std::shared_ptr<StateBagImpl>> m_preCreatedStateBags;
 };
 
 class StateBagImpl : public StateBag
@@ -172,6 +161,8 @@ StateBagImpl::~StateBagImpl()
 {
 	m_parent->UnregisterStateBag(m_id);
 }
+
+
 
 std::optional<std::string> StateBagImpl::GetKey(std::string_view key)
 {
@@ -373,10 +364,9 @@ void StateBagImpl::SendKeyValueToAllTargets(std::string_view key, std::string_vi
 {
 	if (m_useParentTargets)
 	{
-		auto [lock, refTargets] = m_parent->GetTargets();
-		auto targets = refTargets.get();
+		auto targets = m_parent->GetTargets();
 
-		for (int target : targets)
+		for (int target : targets.get())
 		{
 			SendKeyValue(target, key, value);
 		}
@@ -490,35 +480,18 @@ std::shared_ptr<StateBag> StateBagComponentImpl::RegisterStateBag(std::string_vi
 	std::shared_ptr<StateBagImpl> bag;
 	std::string strId{ id };
 
-	// If we're already being erased we should just disown our current weak_ptr
-	bool wasBeingErased;
-	
 	{
-		std::unique_lock _(m_erasureMutex);
-		wasBeingErased = m_erasureList.erase(strId);
-	}
-
-	{
-		std::unique_lock lock(m_mapMutex);
-
-		if (!wasBeingErased)
+		if (auto exIt = m_stateBags.find(strId); exIt != m_stateBags.end())
 		{
-			if (auto exIt = m_stateBags.find(strId); exIt != m_stateBags.end())
+			if (auto bagRef = exIt->second.lock())
 			{
-				auto bagRef = exIt->second.lock();
-
-				if (bagRef)
+				// disown pre-created state bag reference, if this one came from there
+				if (m_preCreatedStateBags.find(strId) != m_preCreatedStateBags.end())
 				{
-					lock.unlock();
-
-					// disown pre-created state bag reference, if this one came from there
-					{
-						std::unique_lock preLock(m_preCreatedStateBagsMutex);
-						m_preCreatedStateBags.erase(bagRef);
-					}
-
-					return bagRef;
+					m_preCreatedStateBags[strId].reset();
 				}
+
+				return bagRef;
 			}
 		}
 
@@ -533,13 +506,19 @@ std::shared_ptr<StateBag> StateBagComponentImpl::RegisterStateBag(std::string_vi
 
 void StateBagComponentImpl::UnregisterStateBag(std::string_view id)
 {
-	std::unique_lock _(m_erasureMutex);
-	m_erasureList.emplace(id);
+	std::string strId{ id };
+	if (auto sb = m_stateBags.find(strId); sb != m_stateBags.end())
+	{
+		sb->second.reset();
+	}
+	if (auto sb = m_preCreatedStateBags.find(strId); sb != m_preCreatedStateBags.end())
+	{
+		sb->second.reset();
+	}
 }
 
 std::shared_ptr<StateBag> StateBagComponentImpl::GetStateBag(std::string_view id)
 {
-	std::shared_lock lock(m_mapMutex);
 	// unfortunately this string allocation is required, because we are not using cpp20 yet
 	// see: https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2018/p0919r2.html
 	// TODO: remove std::string allocation when cpp20 is used
@@ -553,8 +532,6 @@ void StateBagComponentImpl::RegisterTarget(int id)
 	bool isNew = false;
 
 	{
-		std::unique_lock lock(m_mapMutex);
-
 		if (m_targets.find(id) == m_targets.end())
 		{
 			isNew = true;
@@ -565,8 +542,6 @@ void StateBagComponentImpl::RegisterTarget(int id)
 
 	if (isNew)
 	{
-		std::shared_lock lock(m_mapMutex);
-
 		for (auto& data : m_stateBags)
 		{
 			auto entry = data.second.lock();
@@ -581,7 +556,6 @@ void StateBagComponentImpl::RegisterTarget(int id)
 
 void StateBagComponentImpl::UnregisterTarget(int id)
 {
-	std::unique_lock lock(m_mapMutex);
 	m_targets.erase(id);
 
 	for (auto& bag : m_stateBags)
@@ -597,14 +571,11 @@ void StateBagComponentImpl::UnregisterTarget(int id)
 
 void StateBagComponentImpl::AddSafePreCreatePrefix(std::string_view idPrefix, bool useParentTargets)
 {
-	std::unique_lock lock(m_preCreatePrefixMutex);
-	m_preCreatePrefixes.emplace_back(idPrefix, useParentTargets);
+	m_preCreatePrefixes.emplace(idPrefix, useParentTargets);
 }
 
 std::pair<bool, bool> StateBagComponentImpl::IsSafePreCreateName(std::string_view id)
 {
-	std::shared_lock lock(m_preCreatePrefixMutex);
-
 	for (const auto& prefix : m_preCreatePrefixes)
 	{
 		if (id.rfind(prefix.first, 0) == 0) // equivalent of a starts with
@@ -620,48 +591,13 @@ std::shared_ptr<StateBag> StateBagComponentImpl::PreCreateStateBag(std::string_v
 {
 	auto bag = RegisterStateBag(id, useParentTargets);
 
-	{
-		std::unique_lock lock(m_preCreatedStateBagsMutex);
-		m_preCreatedStateBags.insert(std::static_pointer_cast<StateBagImpl>(bag));
-	}
+	m_preCreatedStateBags.emplace(id, std::static_pointer_cast<StateBagImpl>(bag));
 
 	return bag;
 }
 
 void StateBagComponentImpl::AttachToObject(fx::ResourceManager* object)
 {
-	object->OnTick.Connect([this]()
-	{
-		bool isEmpty = true;
-
-		{
-			std::shared_lock _(m_erasureMutex);
-			isEmpty = m_erasureList.empty();
-		}
-
-		if (isEmpty)
-		{
-			return;
-		}
-
-		decltype(m_erasureList) erasureList;
-
-		{
-			std::unique_lock _(m_erasureMutex);
-			erasureList = std::move(m_erasureList);
-		}
-
-		if (!erasureList.empty())
-		{
-			std::unique_lock lock(m_mapMutex);
-
-			for (const auto& id : erasureList)
-			{
-				m_stateBags.erase(id);
-			}
-		}
-	},
-	INT32_MIN);
 }
 
 void StateBagComponentImpl::HandlePacket(int source, std::string_view dataRaw, std::string* outBagNameName)
@@ -805,19 +741,6 @@ void StateBagComponentImpl::QueueSend(int target, net::packet::StateBagPacket& p
 void StateBagComponentImpl::QueueSend(int target, net::packet::StateBagV2Packet& packet)
 {
 	m_gameInterface->SendPacket(target, packet);
-}
-
-void StateBagComponentImpl::Reset()
-{
-	{
-		std::unique_lock _(m_mapMutex);
-		m_stateBags.clear();
-	}
-
-	{
-		std::unique_lock _(m_preCreatedStateBagsMutex);
-		m_preCreatedStateBags.clear();
-	}
 }
 
 fwRefContainer<StateBagComponent> StateBagComponent::Create(StateBagRole role)

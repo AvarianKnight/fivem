@@ -127,11 +127,6 @@ public:
 	virtual ~StateBagComponent() override = default;
 
 	//
-	// Resets the state stored in the state bag component.
-	//
-	virtual void Reset() = 0;
-
-	//
 	// Old state bag control packet handler.
 	// arg: outBagNameName; if given (!= nullptr) and if the state bag wasn't found then this string will contain the bag name, otherwise outBagNameName is unchanged.
 	//
