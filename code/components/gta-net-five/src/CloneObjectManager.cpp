@@ -44,7 +44,7 @@ static void netObjectMgrBase__RegisterNetworkObject(rage::netObjectMgr* manager,
 		object->CreateNetBlender();
 	}
 
-	if (!object->syncData.isRemote)
+	if (!object->m_isRemote)
 	{
 #ifdef GTA_FIVE
 		if (object->CanSynchronise(true))
@@ -72,12 +72,12 @@ static void netObjectMgrBase__DestroyNetworkObject(rage::netObjectMgr* manager, 
 		return g_orig_netObjectMgrBase__DestroyNetworkObject(manager, object);
 	}
 
-	if (!object->syncData.shouldNotBeDeleted)
+	if (!object->m_shouldNotBeDeleted)
 	{
 		CD_FreeSyncData(object->GetObjectId());
 		CloneObjectMgr->DestroyNetworkObject(object);
 
-		if (!object->syncData.isRemote && object->syncData.nextOwnerId == 0xFF)
+		if (!object->m_isRemote && object->m_nextOwnerId == 0xFF)
 		{
 			ObjectIds_ReturnObjectId(object->GetObjectId());
 		}
@@ -109,7 +109,7 @@ static void netObjectMgrBase__ChangeOwner(rage::netObjectMgr* manager, rage::net
 		return g_orig_netObjectMgrBase__ChangeOwner(manager, object, targetPlayer, migrationType);
 	}
 
-	auto oldOwnerId = object->syncData.ownerId;
+	auto oldOwnerId = object->m_ownerId;
 
 	object->ChangeOwner(targetPlayer, migrationType);
 	object->PostMigrate(migrationType);
@@ -146,7 +146,7 @@ static rage::netObject* netObjectMgrBase__GetNetworkObject(rage::netObjectMgr* m
 
 	auto object = CloneObjectMgr->GetNetworkObject(id);
 
-	if (object && object->syncData.wantsToDelete && !evenIfDeleting)
+	if (object && object->m_wantsToDelete && !evenIfDeleting)
 	{
 		object = nullptr;
 	}
@@ -167,7 +167,7 @@ static rage::netObject* netObjectMgrBase__GetNetworkObjectForPlayer(rage::netObj
 
 	auto object = CloneObjectMgr->GetNetworkObject(id);
 
-	if (object && object->syncData.wantsToDelete && !evenIfDeleting)
+	if (object && object->m_wantsToDelete && !evenIfDeleting)
 	{
 		object = nullptr;
 	}

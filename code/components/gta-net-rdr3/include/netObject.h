@@ -20,6 +20,17 @@ namespace rage
 {
 class netBlender;
 class netSyncTree;
+class netObject;
+
+struct netSyncDataBase
+{
+	uint32_t m_playerMasks[3];
+	char pad_14[4];
+	void *unk_18;
+	char pad_20[8];
+	_RTL_CRITICAL_SECTION m_lock;
+	char pad_50[8];
+};
 
 class CNetworkSyncDataULBase
 {
@@ -48,30 +59,19 @@ public:
 	inline virtual void SetCloningFrequency(int player, int frequency) { }
 
 public:
-	char pad[48]; // +16
-	uint16_t objectType; // +64
-	uint16_t objectId; // +66
-	char pad_2[1]; // +68
-	uint8_t ownerId; // +69
-	uint8_t nextOwnerId; // +70
-	uint8_t isRemote; // +71
-	uint8_t wantsToDelete : 1; // +72
-	uint8_t unk1 : 1;
-	uint8_t unk2 : 1;
-	uint8_t shouldNotBeDeleted : 1;
-	char pad_3[3]; // +73;
-	char pad_4[3];
-	char pad_5[32];
-	uint32_t creationAckedPlayers; // +112
-	uint32_t m64;
-	uint32_t m68;
-	uint32_t m6C;
+	netSyncDataBase* m_syncData; // +8
+	uint8_t m_updateLevels[32]; // + 16
+	uint8_t m_minimumUpdateLevel; // +48
+	char padding[7]; // +49
+};
 
-public:
-	inline bool IsCreationAckedByPlayer(int index)
-	{
-		return (creationAckedPlayers & (1 << index)) != 0;
-	}
+struct UnkNetObject_B0
+{
+	netObject* m_selfObject;
+	void* m_reassignProviderFlags;
+	char padC0[28];
+	char padDC[16];
+	char padEC[4];
 };
 
 class netObject
@@ -79,7 +79,57 @@ class netObject
 public:
 	virtual ~netObject() = 0;
 
-	CNetworkSyncDataULBase syncData; // +8
+	CNetworkSyncDataULBase m_syncData; // +8
+
+	uint16_t m_objectType; // +64
+	uint16_t m_objectId; // +66
+	char pad_2[1]; // +68
+	uint8_t m_ownerId; // +69
+	uint8_t m_nextOwnerId; // +70
+	uint8_t m_isRemote; // +71
+
+	uint8_t m_wantsToDelete : 1; // +72
+	uint8_t m_unk1 : 1; // +73
+	uint8_t m_unk2 : 1; // +74
+	uint8_t m_shouldNotBeDeleted : 1; // +75
+
+	uint32_t m_globalEntityFlags; // +76
+	uint8_t m_minUpdateLevel; // +80 
+	uint8_t m_unk51; // +81
+	uint8_t m_unk52; // +82
+	uint8_t m_unk53; // +83
+	uint8_t m_unk54; // +84
+	char pad55[3]; // +85
+
+	void* m_gameObject; // + 88
+	netBlender* m_netBlender; // +96
+	netObject* m_netObject; // + 104
+
+	uint32_t m_creationAckedPlayers; // +112
+	uint32_t m_unk74; // +116
+	uint32_t m_inScopePlayers; // +120
+	uint32_t m_unk7C; // + 124
+	uint32_t m_clonedPlayers; // +128
+	uint32_t m_lastPlayersSyncUpdated; // +132
+	uint32_t m_playerSyncUpdates; // +136
+	char pad4[4]; // +140
+
+	void* m_cloneSyncCB; // +144
+	char pad5[8]; // +152
+
+	uint32_t m_unkA0; // +160
+	uint16_t m_unkA4; // +164
+	uint8_t m_unkA6; // +166
+	uint8_t m_unkA7; // +167
+	char padA8[8]; // +168
+
+	UnkNetObject_B0 m_unkB0; // +176
+
+
+	inline bool IsCreationAckedByPlayer(int index)
+	{
+		return (m_creationAckedPlayers & (1 << index)) != 0;
+	}
 
 	inline netBlender* GetBlender()
 	{
@@ -231,12 +281,12 @@ public:
 
 	inline uint16_t GetObjectId()
 	{
-		return syncData.objectId;
+		return m_objectId;
 	}
 
 	inline uint16_t GetObjectType()
 	{
-		return syncData.objectType;
+		return m_objectType;
 	}
 
 	inline std::string ToString()

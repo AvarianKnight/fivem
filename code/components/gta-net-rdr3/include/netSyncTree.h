@@ -90,10 +90,40 @@ public:
 public:
 	static netSyncTree* GetForType(NetObjEntityType type);
 
+	struct UnkNetSyncTree_5A4
+	{
+	  char unk_0;
+	  uint8_t m_unkIndex;
+	  char pad_2[2];
+	  int m_unkTime;
+	  int m_unkTimers[20];
+	};
+
 private:
 	char pad[168]; // +8
 
+
 public:
 	rage::netSyncNodeBase* syncNode; // +176
+private:
+	rage::netSyncNodeBase *m_currentParent;
+	uint32_t m_numDataNodes;
+	uint32_t m_numDirtiedDataNodes;
+	uint32_t unk_C8;
+	uint32_t unk_CC;
+	void *unk_D0;
+	uint8_t m_unkD8[8];
+	void *m_dataNodes[74];
+	uint32_t unk_330;
+	char pad_334[4];
+	void *m_dirtiedDataNodes[64];
+	uint32_t unk_538;
+	char pad_53C[4];
+	uint32_t unk_540;
+	char pad_544[96];
+	UnkNetSyncTree_5A4 m_unk5A4[5];
+	uint32_t unk_75C;
+public:
+	_RTL_CRITICAL_SECTION m_lock;
 };
 }

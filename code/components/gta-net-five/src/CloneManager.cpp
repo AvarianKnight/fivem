@@ -320,7 +320,7 @@ void CloneManagerLocal::OnObjectDeletion(rage::netObject* netObject)
 {
 	Log("%s: %s\n", __func__, netObject->ToString());
 
-	if (!netObject->syncData.isRemote)
+	if (!netObject->m_isRemote)
 	{
 		if (m_trackedObjects[netObject->GetObjectId()].lastSyncTime != 0ms)
 		{
@@ -413,8 +413,8 @@ void CloneManagerLocal::BindNetLibrary(NetLibrary* netLibrary)
 
 		console::Printf("CloneManager", "-- NETWORK OBJECT %d (class %s) --\n", obj->GetObjectId(), fx::sync::GetNetObjEntityName(obj->GetObjectType()));
 		console::Printf("CloneManager", "Owner: %s (%d)\n", g_playersByNetId[extData.clientId] ? g_playersByNetId[extData.clientId]->GetName() : "null?", extData.clientId);
-		console::Printf("CloneManager", "Is remote: %s\n", obj->syncData.isRemote ? "yes" : "no");
-		console::Printf("CloneManager", "Game client ID: %d\n", obj->syncData.ownerId);
+		console::Printf("CloneManager", "Is remote: %s\n", obj->m_isRemote ? "yes" : "no");
+		console::Printf("CloneManager", "Game client ID: %d\n", obj->m_ownerId);
 		console::Printf("CloneManager", "\n");
 	});
 
@@ -1016,7 +1016,7 @@ bool CloneManagerLocal::HandleCloneCreate(const msgClone& msg)
 		return false;
 	}
 
-	obj->syncData.isRemote = isRemote;
+	obj->m_isRemote = isRemote;
 
 	// check if we can apply
 	if (!syncTree->CanApplyToObject(obj))
@@ -1075,14 +1075,14 @@ bool CloneManagerLocal::HandleCloneCreate(const msgClone& msg)
 	syncTree->ApplyToObject(obj, nullptr);
 
 	// again, ensure it's not local
-	if (obj->syncData.isRemote != isRemote || obj->syncData.ownerId != owner)
+	if (obj->m_isRemote != isRemote || obj->m_ownerId != owner)
 	{
-		console::DPrintf("onesync", "Treason! Owner ID changed to %d.\n", obj->syncData.ownerId);
-		Log("%s: Treason! Owner ID changed to %d.\n", __func__, obj->syncData.ownerId);
+		console::DPrintf("onesync", "Treason! Owner ID changed to %d.\n", obj->m_ownerId);
+		Log("%s: Treason! Owner ID changed to %d.\n", __func__, obj->m_ownerId);
 	}
 
-	obj->syncData.isRemote = isRemote;
-	obj->syncData.ownerId = owner;
+	obj->m_isRemote = isRemote;
+	obj->m_ownerId = owner;
 
 	// register with object mgr
 	rage::netObjectMgr::GetInstance()->RegisterNetworkObject(obj);
@@ -1101,14 +1101,14 @@ bool CloneManagerLocal::HandleCloneCreate(const msgClone& msg)
 	obj->PostCreate();
 
 	// for the last time, ensure it's not local
-	if (obj->syncData.isRemote != isRemote || obj->syncData.ownerId != owner)
+	if (obj->m_isRemote != isRemote || obj->m_ownerId != owner)
 	{
-		console::DPrintf("onesync", "Treason (2)! Owner ID changed to %d.\n", obj->syncData.ownerId);
-		Log("%s: Treason (2)! Owner ID changed to %d.\n", __func__, obj->syncData.ownerId);
+		console::DPrintf("onesync", "Treason (2)! Owner ID changed to %d.\n", obj->m_ownerId);
+		Log("%s: Treason (2)! Owner ID changed to %d.\n", __func__, obj->m_ownerId);
 	}
 
-	obj->syncData.isRemote = isRemote;
-	obj->syncData.ownerId = owner;
+	obj->m_isRemote = isRemote;
+	obj->m_ownerId = owner;
 
 	// if this is owned by us, actually own the object now
 	// (this is done late to make sure the logic is safe)
@@ -1118,7 +1118,7 @@ bool CloneManagerLocal::HandleCloneCreate(const msgClone& msg)
 
 		// call ChangeOwner as this create didn't originate from us, in reality
 		// and ChangeOwner does some fixups (e.g. ped tasks) for sync data
-		if (obj->syncData.isRemote)
+		if (obj->m_isRemote)
 		{
 			auto player = rage::GetLocalPlayer();
 
@@ -1262,7 +1262,7 @@ AckResult CloneManagerLocal::HandleCloneUpdate(const msgClone& msg)
 		{
 			obj->GetBlender()->SetTimestamp(msg.GetTimestamp());
 
-			if (!obj->syncData.isRemote)
+			if (!obj->m_isRemote)
 			{
 				obj->GetBlender()->m_28();
 			}
@@ -1315,7 +1315,7 @@ void CloneManagerLocal::CheckMigration(const msgClone& msg)
 		(g_playersByNetId[msg.GetClientId()]) ? g_playersByNetId[msg.GetClientId()]->GetName() : "(null)");
 
 		// reset next-owner ID as we've just migrated it
-		obj->syncData.nextOwnerId = -1;
+		obj->m_nextOwnerId = -1;
 		extData.pendingClientId = -1;
 
 		auto clientId = msg.GetClientId();
@@ -1343,8 +1343,8 @@ void CloneManagerLocal::CheckMigration(const msgClone& msg)
 
 				player->physicalPlayerIndex() = lastId;
 
-				obj->syncData.isRemote = true;
-				obj->syncData.nextOwnerId = -1;
+				obj->m_isRemote = true;
+				obj->m_nextOwnerId = -1;
 			}
 		}
 
@@ -1651,11 +1651,11 @@ void CloneManagerLocal::DeleteObjectId(uint16_t objectId, uint16_t uniqifier, bo
 		}
 
 		// set flags
-		object->syncData.wantsToDelete = true;
-		object->syncData.shouldNotBeDeleted = false;
+		object->m_wantsToDelete = true;
+		object->m_shouldNotBeDeleted = false;
 
 		// unack the create to unburden the game
-		object->syncData.creationAckedPlayers &= ~(1 << 31);
+		object->m_creationAckedPlayers &= ~(1 << 31);
 
 		// call object manager clone removal
 		rage::netObjectMgr::GetInstance()->UnregisterNetworkObject(object, 8, 0, 1);
@@ -1679,7 +1679,7 @@ void CloneManagerLocal::SetTargetOwner(rage::netObject* object, uint16_t clientI
 
 void CloneManagerLocal::GiveObjectToClient(rage::netObject* object, uint16_t clientId)
 {
-	bool wasLocal = !object->syncData.isRemote;
+	bool wasLocal = !object->m_isRemote;
 
 	if (clientId == m_netLibrary->GetServerNetID() && !wasLocal)
 	{
@@ -1693,8 +1693,8 @@ void CloneManagerLocal::GiveObjectToClient(rage::netObject* object, uint16_t cli
 		objectData.lastSyncAck = msec();
 
 		// this isn't remote anymore
-		object->syncData.isRemote = false;
-		object->syncData.nextOwnerId = -1;
+		object->m_isRemote = false;
+		object->m_nextOwnerId = -1;
 	}
 
 	// TODO: rate-limit resends (in case pending ownership is taking really long)
@@ -1778,8 +1778,27 @@ static HookFunction hookFunctionModifySyncTrees([]()
 });
 #endif
 
+#ifdef IS_RDR3
+static hook::cdecl_stub<void(void*)> _updateNetObjectMultiThreadedCB([]()
+{
+	return hook::get_pattern("48 8B C4 48 89 58 ? 48 89 68 ? 48 89 70 ? 48 89 78 ? 41 56 48 83 EC ? 48 8B 71 ? 48 8B 69");
+});
+
+static hook::cdecl_stub<int(void*, uint32_t)> rage__sysDependencyScheduler__InsertBatch([]()
+{
+	return hook::get_pattern("48 8B 01 4C 8B C9 48 8D 0D");
+});
+
+#endif
+
 void CloneManagerLocal::Update()
 {
+	auto objManager = rage::netObjectMgr::GetInstance();
+	// we can't do anything without the object manager anyways, wait until it exists
+	if (!objManager)
+	{
+		return;
+	}
 #ifndef ONESYNC_CLONING_NATIVES
 	WriteUpdates();
 #endif
@@ -1800,67 +1819,168 @@ void CloneManagerLocal::Update()
 	static uint32_t frameCount = 0;
 #endif
 
-	// run Update() on all clones
-	for (auto& clone : m_savedEntities)
+#ifdef IS_RDR3
+
+	// gets further, need to figure out the actual structure for this, because its not just an array
+	struct WeirdPtr
 	{
-		if (clone.second)
+		void* list;
+		volatile char unk1[24];
+	};
+
+	void* updateList[392];
+	WeirdPtr* ptr = new WeirdPtr();
+	ptr->list = updateList;
+
+	// uint64_t* updateIndexPtr;
+	uint32_t updateIndex = 0;
+
+	rage::netObject* remoteObjectList[401]; // has it at 401 but only allows 392???
+	uint32_t numRemoteObjects = 0;
+
+	rage::netObject* localObjectList[392];
+	uint32_t numLocalObjects = 0;
+	
+
+#endif
+
+	void** cloneSyncCB;
+
+	{
+#if IS_RDR3
+		rage::Mutex netMgrLock(&objManager->m_autoLock);
+#endif
+		// run Update() on all clones
+		for (auto& clone : m_savedEntities)
 		{
-			clone.second->Update();
-
-#ifdef GTA_FIVE
-			if (clone.second->GetGameObject())
+			if (clone.second)
 			{
-				if (clone.second->syncData.isRemote)
+#if IS_RDR3
+				auto netObject = clone.second;
+				if ((netObject->m_wantsToDelete & 1) == 0)
 				{
-					auto ent = (fwEntity*)(clone.second->GetGameObject());
-					auto vtbl = *(char**)ent;
+					netObject->MainThreadUpdate();
 
+					cloneSyncCB = &netObject->m_cloneSyncCB;
+					if (updateIndex < 392)
 					{
-						auto posData = ent->GetPosition();
-						auto pos = DirectX::XMLoadFloat3(&posData);
-
-						auto it = removedFlags.find(ent);
-
-						if (DirectX::XMVectorGetX(DirectX::XMVector2LengthSq(DirectX::XMVectorSubtract(pos, origin))) < (424.f * 424.f))
-						{
-							if (it != removedFlags.end())
-							{
-								fwSceneUpdate__AddToSceneUpdate(ent, it->second);
-
-								removedFlags.erase(it);
-							}
-						}
-						else
-						{
-							if (it == removedFlags.end())
-							{
-								uint32_t flags = 0;
-
-								if (auto ext = ent->GetExtension<fwSceneUpdateExtension>())
-								{
-									flags = ext->GetUpdateFlags();
-								}
-
-								it = removedFlags.emplace(ent, flags).first;
-
-								fwSceneUpdate__RemoveFromSceneUpdate(ent, -1, true);
-							}
-
-							if ((frameCount % 50) < 2)
-							{
-								fwSceneUpdate__AddToSceneUpdate(ent, it->second);
-
-								removedFlags.erase(it);
-							}
-						}
+						netObject->m_unkA7 &= 0xCAu;
+						netObject->m_unkA7 |= 0xAu;
+						*cloneSyncCB = &_updateNetObjectMultiThreadedCB;
+						netObject->m_unkA0 = 0;
+						netObject->m_unkA4 = 0;
+						netObject->m_unkA6 = 0;
+						netObject->m_unkB0.m_reassignProviderFlags = objManager->m_reassignProvider.m_ipcEventRefs;
+						netObject->m_unkB0.m_selfObject = netObject;
+						netObject->m_unkA0 &= 0x1FFFFFFFu;
+						netObject->m_unkA0 |= 0x20000000u;
+						//updateIndexPtr = (uint64_t*)updateIndex++;
+						updateList[updateIndex++] = cloneSyncCB;
 					}
 				}
 
-				clone.second->UpdatePendingVisibilityChanges();
-			}
+				if (netObject->m_isRemote)
+				{
+					remoteObjectList[numRemoteObjects++] = netObject;
+				}
+				else
+				{
+					localObjectList[numLocalObjects++] = netObject;
+				}
 #endif
+
+#ifdef GTA_FIVE
+				clone.second->Update();
+				if (clone.second->GetGameObject())
+				{
+					if (clone.second->syncData.isRemote)
+					{
+						auto ent = (fwEntity*)(clone.second->GetGameObject());
+						auto vtbl = *(char**)ent;
+
+						{
+							auto posData = ent->GetPosition();
+							auto pos = DirectX::XMLoadFloat3(&posData);
+
+							auto it = removedFlags.find(ent);
+
+							if (DirectX::XMVectorGetX(DirectX::XMVector2LengthSq(DirectX::XMVectorSubtract(pos, origin))) < (424.f * 424.f))
+							{
+								if (it != removedFlags.end())
+								{
+									fwSceneUpdate__AddToSceneUpdate(ent, it->second);
+
+									removedFlags.erase(it);
+								}
+							}
+							else
+							{
+								if (it == removedFlags.end())
+								{
+									uint32_t flags = 0;
+
+									if (auto ext = ent->GetExtension<fwSceneUpdateExtension>())
+									{
+										flags = ext->GetUpdateFlags();
+									}
+
+									it = removedFlags.emplace(ent, flags).first;
+
+									fwSceneUpdate__RemoveFromSceneUpdate(ent, -1, true);
+								}
+
+								if ((frameCount % 50) < 2)
+								{
+									fwSceneUpdate__AddToSceneUpdate(ent, it->second);
+
+									removedFlags.erase(it);
+								}
+							}
+						}
+					}
+
+					clone.second->UpdatePendingVisibilityChanges();
+				}
+#endif
+			}
 		}
 	}
+
+#if IS_RDR3
+	objManager->PreMultithreadedUpdate();
+
+	InterlockedExchangeAdd(objManager->m_reassignProvider.m_ipcEventRefs, updateIndex);
+	rage__sysDependencyScheduler__InsertBatch(&ptr, updateIndex);
+
+	if (objManager->m_reassignProvider.m_ipcEventRefs[0])
+	{
+		if (InterlockedExchangeAdd(objManager->m_reassignProvider.m_ipcEventRefs, 0x80000000))
+		{
+			WaitForSingleObject(objManager->m_reassignProvider.m_sysIpcCreateEvent, 0xFFFFFFFF);
+		}
+		objManager->m_reassignProvider.m_ipcEventRefs[0] = 0;
+	}
+
+	objManager->PostMultithreadedUpdate();
+
+	for (auto i = 0; i < numRemoteObjects; i++)
+	{
+		auto obj = remoteObjectList[i];
+		if (obj)
+		{
+			obj->PostDependencyThreadUpdate();
+		}
+	}
+
+	for (auto i = 0; i < numLocalObjects; i++)
+	{
+		auto obj = localObjectList[i];
+		if (obj)
+		{
+			obj->PostDependencyThreadUpdate();
+		}
+	}
+#endif
 
 #ifdef GTA_FIVE
 	frameCount++;
@@ -1888,11 +2008,11 @@ bool CloneManagerLocal::RegisterNetworkObject(rage::netObject* object)
 
 	Log("%s: registering %s (uniqifier: %d)\n", __func__, object->ToString(), m_trackedObjects[object->GetObjectId()].uniqifier);
 
-	if (object->syncData.ownerId != 0xFF)
+	if (object->m_ownerId != 0xFF)
 	{
-		m_netObjects[object->syncData.ownerId][object->GetObjectId()] = object;
+		m_netObjects[object->m_ownerId][object->GetObjectId()] = object;
 
-		if (object->syncData.ownerId != 31)
+		if (object->m_ownerId != 31)
 		{
 			m_extendedData[object->GetObjectId()].clientId = m_netLibrary->GetServerNetID();
 
@@ -2056,7 +2176,7 @@ void CloneManagerLocal::WriteUpdates()
 	auto objectCb = [&](rage::netObject* object)
 	{
 		// skip remote objects
-		if (object->syncData.isRemote)
+		if (object->m_isRemote)
 		{
 			if (m_extendedData[object->GetObjectId()].clientId == m_netLibrary->GetServerNetID())
 			{
@@ -2071,12 +2191,12 @@ void CloneManagerLocal::WriteUpdates()
 			return;
 		}
 
-		if (object->syncData.ownerId == 31)
+		if (object->m_ownerId == 31)
 		{
 			return;
 		}
 
-		if (object->syncData.nextOwnerId != 0xFF)
+		if (object->m_nextOwnerId != 0xFF)
 		{
 			GiveObjectToClient(object, m_extendedData[object->GetObjectId()].pendingClientId);
 		}
@@ -2121,10 +2241,10 @@ void CloneManagerLocal::WriteUpdates()
 		rage::datBitBuffer rlBuffer(packetStub, sizeof(packetStub));
 
 		// if we want to delete this object
-		if (object->syncData.wantsToDelete)
+		if (object->m_wantsToDelete)
 		{
 			// has this been acked by client 31?
-			if (object->syncData.IsCreationAckedByPlayer(31))
+			if (object->IsCreationAckedByPlayer(31))
 			{
 				/*auto& netBuffer = m_sendBuffer;
 
@@ -2139,7 +2259,7 @@ void CloneManagerLocal::WriteUpdates()
 				Log("%s: telling server %d is deleted\n", __func__, object->GetObjectId());*/
 
 				// unack the create to unburden the game
-				object->syncData.creationAckedPlayers &= ~(1 << 31);
+				object->m_creationAckedPlayers &= ~(1 << 31);
 
 				// pretend to ack the remove to process removal
 				_processRemoveAck(objectMgr, object);
@@ -2240,13 +2360,13 @@ void CloneManagerLocal::WriteUpdates()
 		if (syncType == 2)
 		{
 			// ack'd create on player 31
-			object->syncData.creationAckedPlayers |= (1 << 31);
+			object->m_creationAckedPlayers |= (1 << 31);
 
 			// done by netObject::m108
-			object->syncData.m6C |= (1 << 31);
+			object->m_unk7C |= (1 << 31);
 
 			// set sync priority
-			object->syncData.SetCloningFrequency(31, object->GetSyncFrequency());
+			object->m_syncData.SetCloningFrequency(31, object->GetSyncFrequency());
 
 			char* syncData = (char*)object->GetSyncData();
 
