@@ -741,13 +741,6 @@ struct CfxWinConsole : CfxBigConsole
 	}
 };
 
-auto msec()
-{
-	return std::chrono::duration_cast<std::chrono::milliseconds>(
-		std::chrono::high_resolution_clock::now().time_since_epoch()
-		);
-}
-
 #include <boost/algorithm/string.hpp>
 
 struct MiniConsole : CfxBigConsole

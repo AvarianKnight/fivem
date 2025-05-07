@@ -456,8 +456,6 @@ static int CurlXferInfo(void *userdata, curl_off_t dltotal, curl_off_t dlnow, cu
 		cd->progressCallback(info);
 	}
 
-	using namespace std::chrono_literals;
-
 	if (cd->timeoutNoResponse != 0ms)
 	{
 		// first progress callback is the start of the timeout

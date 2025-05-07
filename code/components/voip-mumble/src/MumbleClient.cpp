@@ -22,15 +22,8 @@ using json = nlohmann::json;
 
 static __declspec(thread) MumbleClient* g_currentMumbleClient;
 
-using namespace std::chrono_literals;
-
 constexpr auto kPingInterval = 1000ms;
 constexpr uint16_t kMaxUdpPacket = 1024;
-
-inline std::chrono::milliseconds msec()
-{
-	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now().time_since_epoch());
-}
 
 void MumbleClient::Initialize()
 {

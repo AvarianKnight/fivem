@@ -58,7 +58,7 @@ private:
 
 	bool m_timedOut;
 
-	uint32_t m_lastKeepaliveSent;
+	std::chrono::milliseconds m_lastKeepaliveSent;
 };
 
 static int g_maxMtu = 1300;
@@ -273,7 +273,7 @@ void NetLibraryImplV2::RunFrame()
 		}
 
 		// send keepalive every 100ms (server requires an actual received packet in order to call fx::Client::Touch)
-		if ((timeGetTime() - m_lastKeepaliveSent) > 100)
+		if ((msec() - m_lastKeepaliveSent) > 100ms)
 		{
 			net::Buffer msg(8);
 			msg.Write(0xCA569E63); // msgEnd
@@ -284,7 +284,7 @@ void NetLibraryImplV2::RunFrame()
 				enet_packet_destroy(pingPacket);
 			}
 
-			m_lastKeepaliveSent = timeGetTime();
+			m_lastKeepaliveSent = msec();
 		}
 
 		// update ping metrics

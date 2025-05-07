@@ -415,8 +415,6 @@ namespace net
 
 	void ReverseTcpServer::Reconnect()
 	{
-		using namespace std::chrono_literals;
-
 		m_control = {};
 
 		m_addr = m_loop->resource<uvw::GetAddrInfoReq>();
@@ -454,8 +452,6 @@ namespace net
 
 	void ReverseTcpServer::ReconnectWithPeer(const net::PeerAddress& peer)
 	{
-		using namespace std::chrono_literals;
-
 		m_control = m_loop->resource<uvw::TCPHandle>();
 
 		fwRefContainer<ReverseTcpServer> thisRef(this);

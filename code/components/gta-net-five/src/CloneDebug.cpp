@@ -1060,11 +1060,6 @@ struct ClonePacketData
 
 #include <nutsnbolts.h>
 
-static auto msec()
-{
-	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now().time_since_epoch());
-}
-
 static InitFunction initFunctionDrilldown([]()
 {
 	OnGameFrame.Connect([]()

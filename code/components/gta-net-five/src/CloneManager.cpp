@@ -74,13 +74,6 @@ void AssociateSyncTree(int objectId, rage::netSyncTree* syncTree);
 
 rage::netObject* GetLocalPlayerPedNetObject();
 
-using namespace std::chrono_literals;
-
-inline std::chrono::milliseconds msec()
-{
-	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now().time_since_epoch());
-}
-
 static ICoreGameInit* icgi;
 
 static hook::cdecl_stub<uint32_t()> _getNetAckTimestamp([]()

@@ -461,8 +461,6 @@ void BackdropBrush::OnConnected()
 		auto eb = ef.CreateBrush();
 		eb.SetSourceParameter(L"rawImage", cb);
 
-		using namespace std::chrono_literals;
-
 		auto kfa = winrt::Windows::UI::Xaml::Window::Current().Compositor().CreateVector2KeyFrameAnimation();
 		kfa.InsertKeyFrame(0.0f, { 0.0f, 0.0f });
 		kfa.InsertKeyFrame(0.25f, { 0.0f, -300.0f }, winrt::Windows::UI::Xaml::Window::Current().Compositor().CreateLinearEasingFunction());

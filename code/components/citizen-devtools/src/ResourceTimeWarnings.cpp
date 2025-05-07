@@ -29,7 +29,6 @@
 
 DLL_IMPORT ImFont* GetConsoleFontTiny();
 
-using namespace std::chrono_literals;
 
 void BytesToHumanReadable(std::string& humanSize, int totalBytes)
 {
@@ -304,8 +303,6 @@ static HookFunction hookFunctionGameTime([]()
 	{
 		std::thread([]()
 		{
-			using namespace std::chrono_literals;
-
 			SetThreadName(-1, "Window Watchdog");
 
 			while (true)

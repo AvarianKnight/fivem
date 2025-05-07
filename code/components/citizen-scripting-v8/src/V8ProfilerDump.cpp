@@ -14,11 +14,6 @@
 
 #include <chrono>
 
-inline static std::chrono::milliseconds msec()
-{
-	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now().time_since_epoch());
-}
-
 using v8::CpuProfile;
 using v8::CpuProfileNode;
 using v8::String;

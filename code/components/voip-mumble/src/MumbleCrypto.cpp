@@ -8,11 +8,6 @@
 
 #include <array>
 
-inline std::chrono::milliseconds msec()
-{
-	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now().time_since_epoch());
-}
-
 void MumbleCrypto::Encrypt(const uint8_t* plain, uint8_t* cipher, size_t length)
 {
 	// increase the IV

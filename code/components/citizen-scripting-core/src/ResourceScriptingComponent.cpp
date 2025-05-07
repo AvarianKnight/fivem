@@ -383,13 +383,11 @@ DLL_EXPORT fwEvent<const std::string&> OnScriptInitStatus;
 
 bool DLL_EXPORT UpdateScriptInitialization()
 {
-	using namespace std::chrono_literals;
-
 	static bool wasExecuting;
 
 	if (!fx::g_onNetInitCbs.empty())
 	{
-		std::chrono::high_resolution_clock::duration startTime = std::chrono::high_resolution_clock::now().time_since_epoch();
+		std::chrono::milliseconds startTime = msec();
 
 		std::tuple<std::string, std::function<void()>> initCallback;
 
@@ -402,7 +400,7 @@ bool DLL_EXPORT UpdateScriptInitialization()
 			wasExecuting = true;
 
 			// break and yield after 15ms of script initialization (basically a frame) so the game won't be 'stuck'
-			if ((std::chrono::high_resolution_clock::now().time_since_epoch() - startTime) > 15ms)
+			if ((msec()  - startTime) > 15ms)
 			{
 				trace("Still executing script initialization routines...\n");
 

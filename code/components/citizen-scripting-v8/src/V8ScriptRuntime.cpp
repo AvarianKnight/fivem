@@ -34,11 +34,6 @@ using namespace fx::invoker;
 #include <rapidjson/writer.h>
 #include <MsgpackJson.h>
 
-inline static std::chrono::milliseconds msec()
-{
-	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now().time_since_epoch());
-}
-
 // This copies behavior from mono
 #ifdef WIN32
 #include <windows.h>

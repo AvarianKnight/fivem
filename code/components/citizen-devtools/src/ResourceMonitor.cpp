@@ -22,8 +22,6 @@
 #include <nutsnbolts.h>
 #endif
 
-using namespace std::chrono_literals;
-
 struct AutoConnect
 {
 	AutoConnect()

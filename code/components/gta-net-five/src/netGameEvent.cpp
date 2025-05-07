@@ -28,8 +28,6 @@
 #include "NetGameEventPacketHandler.h"
 #include "NetGameEventV2PacketHandler.h"
 
-using namespace std::chrono_literals;
-
 // TODO: event expiration?
 struct netGameEventState
 {
@@ -743,11 +741,6 @@ static void UnkEventMgr(void* mgr, void* ply)
 	{
 		g_origUnkEventMgr(mgr, ply);
 	}
-}
-
-inline std::chrono::milliseconds msec()
-{
-	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now().time_since_epoch());
 }
 
 static void EventMgr_AddEvent(void* eventMgr, rage::netGameEvent* ev)

@@ -181,8 +181,6 @@ public:
 
 			while (!m_shutdown)
 			{
-				using namespace std::chrono_literals;
-
 				std::this_thread::sleep_for(500ms);
 
 				for (auto& download : m_downloads)

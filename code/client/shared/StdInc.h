@@ -115,6 +115,13 @@
 #include <mutex> // for once_flag on GCC
 #include <chrono>
 
+using namespace std::chrono_literals;
+
+inline std::chrono::milliseconds msec()
+{
+	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now().time_since_epoch());
+}
+
 // our common includes
 #define COMPONENT_EXPORT
 
