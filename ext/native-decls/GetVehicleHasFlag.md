@@ -19,7 +19,7 @@ Get vehicle.meta flag by index. Useful examples include `FLAG_LAW_ENFORCEMENT` (
 ## Return value
 A boolean for whether the flag is set.
 
-### Example
+## Example
 ```lua
 local vehicleFlags = {
     FLAG_SMALL_WORKER = 0,
@@ -43,7 +43,7 @@ local flagsVehicle = GetVehiclePedIsIn(PlayerPedId(), false)
 print(getAllVehicleFlags)
 ```
 
-```javascript
+```js
 const VEHICLE_FLAGS = {
     FLAG_SMALL_WORKER: 0,
     FLAG_BIG: 1,
