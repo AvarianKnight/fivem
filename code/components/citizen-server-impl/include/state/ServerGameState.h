@@ -899,6 +899,7 @@ struct SyncEntityState
 	uint32_t lastOutOfBandTimestamp;
 	uint64_t frameIndex;
 	uint64_t lastFrameIndex;
+	std::atomic_uint8_t forceUpdateCounter{ 0 };
 	uint16_t uniqifier;
 	uint32_t creationToken;
 	uint32_t routingBucket = 0;
@@ -1348,7 +1349,7 @@ struct SyncedEntityData
 	std::chrono::milliseconds nextSync;
 	std::chrono::milliseconds syncDelta;
 	sync::SyncEntityPtr entity;
-	bool forceUpdate;
+	uint8_t m_forceUpdate {0};
 	bool hasCreated;
 	bool hasRoutedStateBag = false;
 	bool hasNAckedCreate = false;
