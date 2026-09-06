@@ -48,6 +48,7 @@
 #include "PackedClonesPacketHandler.h"
 #include "StateBagPacketHandler.h"
 #include "StateBagV2PacketHandler.h"
+#include "VFSManager.h"
 
 extern rage::netObject* g_curNetObjectSelection;
 rage::netObject* g_curNetObject;
@@ -257,7 +258,8 @@ private:
 	};
 
 private:
-	LZ4_streamHC_t m_compStreamDict;
+	LZ4_streamHC_t m_compDict;
+	LZ4_streamHC_t m_compStream;
 
 	std::unordered_map<int, ObjectData> m_trackedObjects;
 
@@ -346,6 +348,8 @@ void CloneManagerLocal::SendPacket(int peer, net::packet::StateBagV2Packet& pack
 	m_netLibrary->SendNetPacket(packet);
 }
 
+static bool g_enableCompressionLog = false;
+
 void CloneManagerLocal::BindNetLibrary(NetLibrary* netLibrary)
 {
 	// set the net library
@@ -397,6 +401,8 @@ void CloneManagerLocal::BindNetLibrary(NetLibrary* netLibrary)
 	.detach();
 
 	static ConVar<std::string> logFile("onesync_logFile", ConVar_UserPref, "", &m_logFile);
+	
+	static ConVar<bool> compressionLogging("onesync_compressionLogging", ConVar_UserPref, false, &g_enableCompressionLog);
 
 	static ConsoleCommand printObj("net_printOwner", [this](int objectId)
 	{
@@ -454,13 +460,14 @@ void CloneManagerLocal::BindNetLibrary(NetLibrary* netLibrary)
 
 	m_serverSendFrame = 0;
 
-	LZ4_initStreamHC(&m_compStreamDict, sizeof(m_compStreamDict));
+	LZ4_initStreamHC(&m_compDict, sizeof(m_compDict));
+	LZ4_initStreamHC(&m_compStream, sizeof(m_compStream));
 
 	const static uint8_t dictBuffer[65536] = {
 #include <state/dict_five_20210329.h>
 	};
 
-	LZ4_loadDictHC(&m_compStreamDict, reinterpret_cast<const char*>(dictBuffer), std::size(dictBuffer));
+	LZ4_loadDictHC(&m_compDict, reinterpret_cast<const char*>(dictBuffer), std::size(dictBuffer));
 }
 
 void CloneManagerLocal::Reset()
@@ -2499,28 +2506,36 @@ void CloneManagerLocal::SendUpdates(rl::MessageBuffer& buffer, uint32_t msgType)
 		std::vector<char> outData(LZ4_compressBound(buffer.GetDataLength()) + 4);
 		int len = 0;
 
-		// see https://github.com/lz4/lz4/issues/399#issuecomment-329337170
-		LZ4_streamHC_t compStream;
-		memcpy(&compStream, &m_compStreamDict, sizeof(compStream));
+		LZ4_resetStreamHC_fast(&m_compStream, LZ4HC_CLEVEL_DEFAULT);
+		LZ4_attach_HC_dictionary(&m_compStream, &m_compDict);
 
-		len = LZ4_compress_HC_continue(&compStream, reinterpret_cast<const char*>(buffer.GetBuffer().data()), outData.data() + 4, buffer.GetDataLength(), outData.size() - 4);
+		len = LZ4_compress_HC_continue(&m_compStream, reinterpret_cast<const char*>(buffer.GetBuffer().data()), outData.data() + 4, buffer.GetDataLength(), outData.size() - 4);
 
 		Log("compressed %d bytes to %d bytes\n", buffer.GetDataLength(), len);
 
 		*(uint32_t*)(outData.data()) = msgType;
 		m_netLibrary->RoutePacket(outData.data(), len + 4, 0xFFFF);
 
-#if _DEBUG && WRITE_BYTEHUNK
-		static int byteHunkId;
-
-		FILE* f = _wfopen(MakeRelativeCitPath(fmt::sprintf(L"cache/byteHunk/bytehunk-%d.bin", byteHunkId++)).c_str(), L"wb");
-
-		if (f)
+		if (g_enableCompressionLog)
 		{
-			fwrite(buffer.GetBuffer().data(), 1, buffer.GetDataLength(), f);
-			fclose(f);
+			// Init byte hunk path once
+			static auto _ = []
+			{
+				auto cachePath = MakeRelativeCitPath("cache/byteHunk/");
+				CreateDirectoryW(cachePath.c_str(), NULL);
+				
+				return 0;
+			}();
+			
+			static int byteHunkId;
+			auto fileName = fmt::sprintf("cache:/byteHunk/bytehunk-%d.bin", byteHunkId++);
+			auto vfs = vfs::OpenWrite(fileName);
+			
+			if (vfs.GetRef())
+			{
+				vfs->Write(buffer.GetBuffer().data(), buffer.GetDataLength());
+			}
 		}
-#endif
 
 		buffer.SetCurrentBit(0);
 		*lastSendVar = msec();
