@@ -499,9 +499,9 @@ namespace fx
 			};
 			if (enet_peer_send(peerPair->second, channel, packet) != 0)
 			{
-				enet_packet_destroy(packet);
 				console::DPrintf("enet", "Failed to send packet. Peer state: %d, channel: %d (channel cnt %d), data size: %d (max %d).\n",
 					peerPair->second->state, channel, peerPair->second->channelCount, packet->dataLength, peerPair->second->host->maximumPacketSize);
+				enet_packet_destroy(packet);
 			}
 		}
 
