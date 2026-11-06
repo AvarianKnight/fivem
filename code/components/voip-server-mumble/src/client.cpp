@@ -148,7 +148,10 @@ void Client_janitor()
 		{
 			/* No activity from client - assume it is lost and close. */
 			Log_info_client(c, "Timeout, closing.");
-			c->stream->Close();
+			auto stream = c->stream;
+			stream->ScheduleCallback([stream]() {
+				stream->Close();
+			});
 			// Client_free(c);
 		}
 	}
@@ -716,7 +719,7 @@ int Client_send_message(client_t* client, message_t* msg)
 	{
 		int len;
 		len = Msg_messageToNetwork(msg, client->txbuf);
-		if (len <= 0 || len > BUFSIZE)
+		if (len <= 0 || len > TCP_BUFSIZE)
 		{
 			Msg_free(msg);
 			return -1;
@@ -837,7 +840,6 @@ bool_t checkDecrypt(client_t* client, const uint8_t* encrypted, uint8_t* plain, 
 	return false;
 }
 
-#define UDP_PACKET_SIZE 1024
 int Client_read_udp(int udpsock)
 {
 	int len;
@@ -854,11 +856,11 @@ int Client_read_udp(int udpsock)
 	uint8_t encbuff[UDP_PACKET_SIZE + 8];
 	uint8_t* encrypted = encbuff + 4;
 #else
-	uint8_t encrypted[UDP_PACKET_SIZE];
+	uint8_t encrypted[UDP_MAX_PACKET_SIZE];
 #endif
-	uint8_t buffer[UDP_PACKET_SIZE];
+	uint8_t buffer[UDP_MAX_PACKET_SIZE];
 
-	len = recvfrom(udpsock, (char*)encrypted, UDP_PACKET_SIZE, MSG_TRUNC, (struct sockaddr*)&from, &fromlen);
+	len = recvfrom(udpsock, (char*)encrypted, UDP_MAX_PACKET_SIZE, MSG_TRUNC, (struct sockaddr*)&from, &fromlen);
 
 	memset(key, 0, KEY_LENGTH);
 
@@ -879,7 +881,7 @@ int Client_read_udp(int udpsock)
 
 	if (len <= 0)
 		return -1;
-	else if (len < 5 || len > UDP_PACKET_SIZE) /* 4 bytes crypt header + type + session */
+	else if (len < 5 || len > UDP_MAX_PACKET_SIZE) /* 4 bytes crypt header + type + session */
 		return 0;
 
 	/*
@@ -994,9 +996,9 @@ static inline void Client_send_voice(client_t* src, client_t* dst, uint8_t* data
 /* Handle decrypted voice message */
 int Client_voiceMsg(client_t* client, uint8_t* data, int len)
 {
-	uint8_t buffer[UDP_PACKET_SIZE];
+	uint8_t buffer[UDP_MAX_PACKET_SIZE];
 	pds_t* pdi = Pds_create(data + 1, len - 1);
-	pds_t* pds = Pds_create(buffer + 1, UDP_PACKET_SIZE - 1);
+	pds_t* pds = Pds_create(buffer + 1, UDP_MAX_PACKET_SIZE - 1);
 	unsigned int type = data[0] & 0xe0;
 	unsigned int target = data[0] & 0x1f;
 	unsigned int poslen, counter, size;
@@ -1008,7 +1010,7 @@ int Client_voiceMsg(client_t* client, uint8_t* data, int len)
 
 	eastl::fixed_set<client_t*, 256> listeningUsers;
 
-	if (!client->authenticated || client->mute || client->self_mute || !ch || ch->silent)
+	if (!client->authenticated || client->mute || client->self_mute || !ch || ch->silent || len > UDP_MAX_PACKET_SIZE)
 		goto out;
 
 	packetsize = 20 + 8 + 4 + len;

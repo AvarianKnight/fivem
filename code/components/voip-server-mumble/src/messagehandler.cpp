@@ -462,7 +462,11 @@ void Mh_handle_message(client_t* client, message_t* msg)
 			}
 			else
 			{
-				memcpy(client->cryptState.decrypt_iv, msg->payload.cryptSetup->client_nonce().data(), AES_BLOCK_SIZE);
+				const auto& nonce = msg->payload.cryptSetup->client_nonce();
+				if (nonce.size() != AES_BLOCK_SIZE) {
+					break;
+				}
+				memcpy(client->cryptState.decrypt_iv, nonce.data(), AES_BLOCK_SIZE);
 				client->cryptState.uiResync++;
 			}
 			break;

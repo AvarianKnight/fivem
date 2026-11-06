@@ -53,9 +53,9 @@
 
 #include "StreamByteReader.h"
 
+#define UDP_MAX_PACKET_SIZE 1024
 #define READ_BUFFER_SIZE (8192 + 6 + 4) * 2
-#define BUFSIZE 8192
-#define UDP_BUFSIZE 512
+#define TCP_BUFSIZE 8192
 #define INACTIVITY_TIMEOUT 60 /* Seconds */
 #define MAX_CODECS 10
 #define MAX_TOKENSIZE 64
@@ -80,7 +80,7 @@ typedef struct
 	net::PeerAddress remote_udp;
 	uint8_t rcvbuf[READ_BUFFER_SIZE];
 	net::StreamByteReader streamByteReader{ rcvbuf, READ_BUFFER_SIZE };
-	uint8_t txbuf[BUFSIZE];
+	uint8_t txbuf[TCP_BUFSIZE];
 	uint32_t rxcount, txcount, txsize;
 	int sessionId;
 	uint8_t key[KEY_LENGTH];

@@ -391,6 +391,10 @@ static InitFunction initFunction([]()
 				{
 					uint32_t len = ntohl(*(uint32_t*)&bytes[2]);
 
+					if (len > 8192) {
+						return net::MultiplexPatternMatchResult::NoMatch;
+					}
+
 					// hacky, actually should check parsing
 					if (bytes.size() < (static_cast<size_t>(len) + 6))
 					{
@@ -435,6 +439,30 @@ static InitFunction initFunction([]()
 				Client_add(stream, &client);
 			}
 
+			stream->SetCloseCallback([=]()
+			{
+				ClearMumbleAddress(client->remote_udp);
+				if (!mumble_allowExternalConnections->GetValue())
+				{
+					int playerId = Client_getPlayerId(client, client->username);
+					if (playerId != -1)
+					{
+						std::unique_lock lock(g_clientIdsMutex);
+						g_clientIds.erase(playerId);
+					}
+				}
+
+				std::lock_guard _(g_mumbleClientMutex);
+				auto mapEntry = clientsPerIP.find(client->remote_tcp.GetHost());
+				if (mapEntry->second == 1)
+					clientsPerIP.erase(mapEntry);
+				else
+					mapEntry->second--;
+
+				// It is assumed Client_free is only ever called from this location.
+				Client_free(client);
+			});
+
 			stream->SetReadCallback([=](const std::vector<uint8_t>& data)
 			{
 				std::lock_guard _(g_mumbleClientMutex);
@@ -474,7 +502,7 @@ static InitFunction initFunction([]()
 					return;
 				}
 
-				if (data.size() > (1024 * 1024 * 25))
+				if (data.size() > TCP_BUFSIZE)
 				{
 					stream->Close();
 					return;
@@ -496,30 +524,6 @@ static InitFunction initFunction([]()
 				{
 					stream->Close();
 				}
-			});
-
-			stream->SetCloseCallback([=]()
-			{
-				ClearMumbleAddress(client->remote_udp);
-				if (!mumble_allowExternalConnections->GetValue())
-				{
-					int playerId = Client_getPlayerId(client, client->username);
-					if (playerId != -1)
-					{
-						std::unique_lock lock(g_clientIdsMutex);
-						g_clientIds.erase(playerId);
-					}
-				}
-
-				std::lock_guard _(g_mumbleClientMutex);
-				auto mapEntry = clientsPerIP.find(client->remote_tcp.GetHost());
-				if (mapEntry->second == 1)
-					clientsPerIP.erase(mapEntry);
-				else
-					mapEntry->second--;
-
-				// It is assumed Client_free is only ever called from this location.
-				Client_free(client);
 			});
 		});
 
@@ -562,6 +566,11 @@ static InitFunction initFunction([]()
 
 		interceptor->OnIntercept.Connect([interceptor](const net::PeerAddress& address, const uint8_t* data, size_t len, bool* intercepted)
 		{
+			// 1024 is the max udp length for mumble, if its bigger we don't need to check
+			if (len > UDP_PACKET_SIZE) {
+				return;
+			}
+
 			bool known = false;
 
 			if (!IsMumbleAddress(address, known))
@@ -595,7 +604,7 @@ static InitFunction initFunction([]()
 			// Mumble clients are expected to be connected to TCP already - if this is not a known Mumble TCP pair, mark and drop
 			client_t* client = nullptr;
 
-			uint8_t buffer[1024] = { 0 };
+			uint8_t buffer[UDP_PACKET_SIZE] = { 0 };
 
 			// Lock moved from the interceptor assignment below to this location
 			// to avoid conflict with Client_free while ensuring retryPairs does
