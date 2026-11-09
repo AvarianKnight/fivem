@@ -50,8 +50,6 @@
 #include "sharedmemory.h"
 #include "MumbleMessage.h"
 
-/* globals */
-bool_t shutdown_server;
 extern char* bindaddr;
 extern char* bindaddr6;
 extern int bindport;
@@ -61,184 +59,6 @@ bool_t hasv4 = true, hasv6 = true;
 
 const int on = 1;
 int nofServerSocks = 4;
-
-#if 0
-void Server_runLoop(struct pollfd* pollfds)
-{
-	int timeout, rc, clientcount;
-
-	etimer_t janitorTimer;
-	Timer_init(&janitorTimer);
-
-	while (!shutdown_server) {
-		struct sockaddr_storage remote;
-		int i;
-
-#ifdef USE_SHAREDMEMORY_API
-    Sharedmemory_alivetick();
-#endif
-
-		for(i = 0; i < nofServerSocks; i++) {
-			pollfds[i].revents = 0;
-		}
-
-		clientcount = Client_getfds(&pollfds[nofServerSocks]);
-
-		timeout = (int)(1000000LL - (int64_t)Timer_elapsed(&janitorTimer)) / 1000LL;
-		if (timeout <= 0) {
-			Client_janitor();
-			Timer_restart(&janitorTimer);
-			timeout = (int)(1000000LL - (int64_t)Timer_elapsed(&janitorTimer)) / 1000LL;
-		}
-		rc = poll(pollfds, clientcount + nofServerSocks, timeout);
-		if (rc == 0) {
-			/* Poll timed out, do maintenance */
-			Timer_restart(&janitorTimer);
-			Client_janitor();
-			continue;
-		}
-		if (rc < 0) {
-			if (errno == EINTR) /* signal */
-				continue;
-			else
-				Log_fatal("poll: error %d (%s)", errno, strerror(errno));
-		}
-
-		/* Check for new connection */
-		for (i = 0; i < nofServerSocks / 2; i++) {
-			if (pollfds[i].revents) {
-				int tcpfd;
-				uint32_t addrlen = sizeof(struct sockaddr_storage);
-				tcpfd = accept(pollfds[i].fd, (struct sockaddr *)&remote, &addrlen);
-				fcntl(tcpfd, F_SETFL, O_NONBLOCK);
-				setsockopt(tcpfd, IPPROTO_TCP, TCP_NODELAY, (char *) &on, sizeof(int));
-				char *addressString = Util_addressToString(&remote);
-				Log_debug("Connection from %s port %d\n", addressString, Util_addressToPort(&remote));
-				free(addressString);
-				if (Client_add(tcpfd, &remote) < 0)
-					close(tcpfd);
-			}
-		}
-
-		for (i = nofServerSocks / 2; i < nofServerSocks; i++) {
-			if (pollfds[i].revents)
-				Client_read_udp(udpsocks[i - nofServerSocks / 2]);
-		}
-
-		for (i = 0; i < clientcount; i++) {
-			if (pollfds[nofServerSocks + i].revents & POLLIN)
-				Client_read_fd(pollfds[nofServerSocks + i].fd);
-
-			if (pollfds[nofServerSocks + i].revents & POLLOUT)
-				Client_write_fd(pollfds[nofServerSocks + i].fd);
-		}
-#ifdef USE_SHAREDMEMORY_API
-    Sharedmemory_update();
-#endif
-	}
-}
-
-void Server_setupTCPSockets(struct sockaddr_storage* addresses[2], struct pollfd* pollfds)
-{
-	int yes = 1;
-	int sockets[2];
-
-	if (hasv4) {
-		/* IPv4 socket setup */
-		sockets[0] = socket(PF_INET, SOCK_STREAM, 0);
-		if (sockets[0] < 0)
-			Log_fatal("socket IPv4");
-		if (setsockopt(sockets[0], SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) != 0)
-			Log_fatal("setsockopt IPv4: %s", strerror(errno));
-		if (bind(sockets[0], (struct sockaddr *)addresses[0], sizeof (struct sockaddr_in)) < 0) {
-			char *addressString = Util_addressToString(addresses[0]);
-			Log_fatal("bind %s %d: %s", addressString, Util_addressToPort(addresses[0]), strerror(errno));
-			free(addressString);
-		}
-		if (listen(sockets[0], 3) < 0)
-			Log_fatal("listen IPv4");
-		fcntl(sockets[0], F_SETFL, O_NONBLOCK);
-
-		pollfds[0].fd = sockets[0];
-		pollfds[0].events = POLLIN;
-	}
-
-	if (hasv6) {
-		/* IPv6 socket setup */
-		sockets[1] = socket(PF_INET6, SOCK_STREAM, 0);
-		if (sockets[1] < 0)
-			Log_fatal("socket IPv6: %s", strerror(errno));
-		if (setsockopt(sockets[1], SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) != 0)
-			Log_fatal("setsockopt IPv6: %s", strerror(errno));
-		if (setsockopt(sockets[1], IPPROTO_IPV6, IPV6_V6ONLY, &yes, sizeof(int)) != 0)
-			Log_fatal("setsockopt IPv6: %s", strerror(errno));
-		if (bind(sockets[1], (struct sockaddr *)addresses[1], sizeof (struct sockaddr_in6)) < 0) {
-			char *addressString = Util_addressToString(addresses[1]);
-			Log_fatal("bind %s %d: %s", addressString, Util_addressToPort(addresses[1]), strerror(errno));
-			free(addressString);
-		}
-		if (listen(sockets[1], 3) < 0)
-			Log_fatal("listen IPv6");
-		fcntl(sockets[1], F_SETFL, O_NONBLOCK);
-
-
-		/* If  there is an IPv4 address, then IPv6 will use the second socket, otherwise it uses the first */
-		pollfds[(hasv4) ? 1 : 0].fd = sockets[1];
-		pollfds[(hasv4) ? 1 : 0].events = POLLIN;
-	}
-}
-
-void Server_setupUDPSockets(struct sockaddr_storage* addresses[2], struct pollfd* pollfds)
-{
-	int val = 0;
-	int sockets[2] = {-1, -1};
-
-	udpsocks = Memory_safeCalloc(nofServerSocks / 2, sizeof(int));
-
-	if (hasv4) {
-		sockets[0] = socket(PF_INET, SOCK_DGRAM, 0);
-		if (bind(sockets[0], (struct sockaddr *) addresses[0], sizeof (struct sockaddr_in)) < 0) {
-			char *addressString = Util_addressToString(addresses[0]);
-			Log_fatal("bind %s %d: %s", addressString, Util_addressToPort(addresses[0]), strerror(errno));
-			free(addressString);
-		}
-		val = 0xe0;
-		if (setsockopt(sockets[0], IPPROTO_IP, IP_TOS, &val, sizeof(val)) < 0)
-			Log_warn("Server: Failed to set TOS for UDP Socket");
-		val = 0x80;
-		if (setsockopt(sockets[0], IPPROTO_IP, IP_TOS, &val, sizeof(val)) < 0)
-			Log_warn("Server: Failed to set TOS for UDP Socket");
-
-		fcntl(sockets[0], F_SETFL, O_NONBLOCK);
-		pollfds[(hasv6) ? 2 : 1].fd = sockets[0];
-		pollfds[(hasv6) ? 2 : 1].events = POLLIN | POLLHUP | POLLERR;
-		udpsocks[0] = sockets[0];
-	}
-
-	if (hasv6) {
-		sockets[1] = socket(PF_INET6, SOCK_DGRAM, 0);
-		if (setsockopt(sockets[1], IPPROTO_IPV6, IPV6_V6ONLY, &on, sizeof(int)) != 0)
-			Log_fatal("setsockopt IPv6: %s", strerror(errno));
-		if (bind(sockets[1], (struct sockaddr *) addresses[1], sizeof (struct sockaddr_in6)) < 0) {
-			char *addressString = Util_addressToString(addresses[1]);
-			Log_fatal("bind %s %d: %s", addressString, Util_addressToPort(addresses[1]), strerror(errno));
-			free(addressString);
-		}
-		val = 0xe0;
-		if (setsockopt(sockets[1], IPPROTO_IPV6, IPV6_TCLASS, &val, sizeof(val)) < 0)
-			Log_warn("Server: Failed to set TOS for UDP Socket");
-		val = 0x80;
-		if (setsockopt(sockets[1], IPPROTO_IPV6, IPV6_TCLASS, &val, sizeof(val)) < 0)
-			Log_warn("Server: Failed to set TOS for UDP Socket");
-
-		fcntl(sockets[1], F_SETFL, O_NONBLOCK);
-		pollfds[(hasv4) ? 3 : 1].fd = sockets[1];
-		pollfds[(hasv4) ? 3 : 1].events = POLLIN | POLLHUP | POLLERR;
-		udpsocks[(hasv4) ? 1 : 0] = sockets[1];
-	}
-
-}
-#endif
 
 void Server_run()
 {
@@ -267,11 +87,6 @@ void Server_run()
 	Client_disconnect_all();
 }
 
-void Server_shutdown()
-{
-	shutdown_server = true;
-}
-
 #include <HttpServerManager.h>
 #include <TcpServerManager.h>
 #include <MultiplexTcpServer.h>
@@ -297,7 +112,6 @@ int Client_send_udp(client_t* client, uint8_t* data, int len);
 static std::shared_mutex mumblePairsMutex;
 static std::map<net::PeerAddress, bool> mumblePairs;
 
-std::recursive_mutex g_mumbleClientMutex;
 static std::map<net::PeerAddress, int> retryPairs;
 
 static std::map<std::string, int> clientsPerIP;
@@ -364,12 +178,14 @@ static void EnsureServerInitialized()
 std::shared_ptr<ConVar<bool>> mumble_disableServer;
 std::shared_ptr<ConVar<int>> mumble_maxClientsPerIP;
 std::shared_ptr<ConVar<bool>> mumble_allowExternalConnections;
+std::shared_ptr<MumbleServer> g_mumbleServer;
 
 static InitFunction initFunction([]()
 {
 	mumble_disableServer = std::make_shared<ConVar<bool>>("mumble_disableServer", ConVar_None, false);
 	mumble_maxClientsPerIP = std::make_shared<ConVar<int>>("mumble_maxClientsPerIP", ConVar_None, 32);
 	mumble_allowExternalConnections = std::make_shared<ConVar<bool>>("mumble_allowExternalConnections", ConVar_None, false);
+	g_mumbleServer = std::make_shared<MumbleServer>();
 
 	fx::ServerInstanceBase::OnServerCreate.Connect([](fx::ServerInstanceBase* instance)
 	{
@@ -416,7 +232,8 @@ static InitFunction initFunction([]()
 			client_t* client;
 
 			{
-				std::lock_guard _(g_mumbleClientMutex);
+				// NOT SAFE: NEED SOME LOCKING HERE
+				//std::lock_guard _(g_mumbleClientMutex);
 
 				auto hostIP = stream->GetPeerAddress().GetHost();
 				auto mapEntry = clientsPerIP.find(hostIP);
@@ -442,15 +259,14 @@ static InitFunction initFunction([]()
 
 			stream->SetCloseCallback([=]()
 			{
-				std::lock_guard _(g_mumbleClientMutex);
+				std::shared_lock _(client->m_clientMutex);
 				ClearMumbleAddress(client->remote_udp);
-				if (!mumble_allowExternalConnections->GetValue())
+				if (!g_mumbleServer->AreExternalConnectionsAllowed())
 				{
 					int playerId = Client_getPlayerId(client, client->username);
 					if (playerId != -1)
 					{
-						std::unique_lock lock(g_clientIdsMutex);
-						g_clientIds.erase(playerId);
+						g_mumbleServer->ResetServerId(playerId);
 					}
 				}
 
@@ -468,38 +284,7 @@ static InitFunction initFunction([]()
 
 			stream->SetReadCallback([=](const std::vector<uint8_t>& data)
 			{
-				std::lock_guard _(g_mumbleClientMutex);
-
-				Timer_restart(&client->lastActivity);
-
-#if 0
-				message_t *msg;
-
-				memcpy(&client->rxbuf[client->rxcount], data.data(), data.size());
-				client->rxcount += data.size();
-				if (!client->msgsize && client->rxcount >= 6) {
-					uint32_t msgLen;
-					memcpy(&msgLen, &client->rxbuf[2], sizeof(uint32_t));
-					client->msgsize = ntohl(msgLen);
-				}
-				if (client->msgsize > BUFSIZE - 6) {
-					/* XXX - figure out how to handle this. A large size here can represent two cases:
-					* 1. A valid size. The only message that is this big is UserState message with a big texture
-					* 2. An invalid size = protocol error, e.g. connecting with a 1.1.x client
-					*/
-					Log_warn("Too big message received (%d bytes). Playing safe and disconnecting client %s",
-						client->msgsize, client->remote_tcp.ToString().c_str());
-					stream->Close();
-					/* client->rxcount = client->msgsize = 0; */
-				}
-				else if (client->rxcount == client->msgsize + 6) { /* Got all of the message */
-					msg = Msg_networkToMessage(client->rxbuf, client->msgsize + 6);
-					/* pass messsage to handler */
-					if (msg)
-						Mh_handle_message(client, msg);
-					client->rxcount = client->msgsize = 0;
-				}
-#endif
+				std::unique_lock _(client->m_clientMutex);
 				if (data.empty())
 				{
 					return;
@@ -527,6 +312,11 @@ static InitFunction initFunction([]()
 				{
 					stream->Close();
 				}
+
+				if (client->authenticated)
+				{
+					Timer_restart(&client->lastActivity);
+				}
 			});
 		});
 
@@ -540,7 +330,6 @@ static InitFunction initFunction([]()
 			while (true)
 			{
 				std::this_thread::sleep_for(1000ms);
-				std::lock_guard _(g_mumbleClientMutex);
 
 				Client_janitor();
 
@@ -586,7 +375,7 @@ static InitFunction initFunction([]()
 				return;
 			}
 
-			if (mumble_allowExternalConnections->GetValue())
+			if (g_mumbleServer->AreExternalConnectionsAllowed())
 			{
 				// is this a Mumble ping?
 				if (len == 12 && *(uint32_t*)data == 0)
@@ -614,39 +403,34 @@ static InitFunction initFunction([]()
 
 			uint8_t buffer[UDP_MAX_PACKET_SIZE] = { 0 };
 
-			// Lock moved from the interceptor assignment below to this location
-			// to avoid conflict with Client_free while ensuring retryPairs does
-			// not race with the Client_janitor thread.
-			//
-			// This may add a little bit more contention when processing unknown
-			// addresses. Servers testing this did not report any noticeable
-			// change in performance.
-			std::lock_guard _(g_mumbleClientMutex);
-
 			if (!known)
 			{
 				// try finding a client for whom the packet will decrypt correctly
 				client_t* itr = nullptr;
 				bool found = false;
 
-				while (Client_iterate(&itr) != nullptr)
-				{
-					if (itr->remote_udp == net::PeerAddress{} && (itr->remote_tcp.GetHostBytes() == fromAddress || itr->remote_tcp.GetHostBytesV6() == fromAddress))
+				g_mumbleServer->ForAllSocketlessClients([&fromAddress, &address, &data, &known, &buffer, len, &found, &itr](client_t* client) {
+					std::shared_lock _(client->m_clientMutex);
+
+					if (client->remote_udp == net::PeerAddress{} && (client->remote_tcp.GetHostBytes() == fromAddress || client->remote_tcp.GetHostBytesV6() == fromAddress))
 					{
 						known = true;
 
 						// try decrypting the packet, maybe it'll be mumble
-						if (checkDecrypt(itr, data, buffer, std::min(len, sizeof(buffer))))
+						if (checkDecrypt(client, data, buffer, std::min(len, sizeof(buffer))))
 						{
 							// it's mumble!
 							retryPairs[address] = 0;
 
 							found = true;
 
-							break;
+							itr = client;
+
+							return true;
 						}
 					}
-				}
+					return false;
+				});
 
 				// if no client matched even on IP, mark this pair as dead
 				if (!known)
@@ -675,23 +459,12 @@ static InitFunction initFunction([]()
 				// mumble! let's mark it
 				SetMumbleAddress(address, true);
 
+				std::unique_lock _(itr->m_clientMutex);
 				itr->remote_udp = address;
-
-				client = itr;
 			}
 			else
 			{
-				client_t* itr = nullptr;
-
-				// find the right client from our client list
-				while (Client_iterate(&itr) != nullptr)
-				{
-					if (itr->remote_udp == address)
-					{
-						client = itr;
-						break;
-					}
-				}
+				client_t* client = g_mumbleServer->GetClientFromAddress(address);
 
 				if (!client)
 				{
@@ -710,6 +483,7 @@ static InitFunction initFunction([]()
 				return;
 			}
 
+			std::unique_lock _(client->m_clientMutex);
 			client->interceptor = interceptor.GetRef();
 
 			*intercepted = true;

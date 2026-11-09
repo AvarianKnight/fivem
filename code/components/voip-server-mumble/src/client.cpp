@@ -51,6 +51,9 @@
 #include "ChannelListener.h"
 
 #include <EASTL/fixed_set.h>
+#include "server.h"
+
+extern std::shared_ptr<MumbleServer> g_mumbleServer;
 
 extern char system_string[], version_string[];
 
@@ -96,61 +99,56 @@ int Client_getfds(struct pollfd* pollfds)
 // #TODO: Have servers create ETW traces of the two player_muted functions being
 // used. In the worst case we are facing N calls to strncmp (previously strstr),
 // and this is incredibly inefficient.
-bool Client_is_player_muted(const char* namePrefix, size_t len)
+bool Client_is_player_muted(int serverId)
 {
-	struct dlist *itr, *save;
-	list_iterate_safe(itr, save, &clients)
+	client_t* client = g_mumbleServer->GetClientFromServerId(serverId);
+	if (client)
 	{
-		client_t* c;
-		c = list_get_entry(itr, client_t, node);
-		if (c->username && strncmp(c->username, namePrefix, len) == 0)
-		{
-			return c->mute;
-		}
+		return client->m_mute;
 	}
 
 	return false;
 }
 
-void Client_set_player_muted(const char* namePrefix, size_t len, bool muted)
+void Client_set_player_muted(int serverId, bool muted)
 {
-	struct dlist *itr, *save;
-	list_iterate_safe(itr, save, &clients)
+
+	client_t* client = g_mumbleServer->GetClientFromServerId(serverId);
+	if (client)
 	{
-		client_t* c;
-		c = list_get_entry(itr, client_t, node);
-		if (c->username && strncmp(c->username, namePrefix, len) == 0)
-		{
-			c->mute = muted;
-			break;
-		}
+		client->m_mute = muted;
 	}
 }
 
 void Client_janitor()
 {
-	struct dlist *itr, *save;
 	int bwTop = maxBandwidth + maxBandwidth / 4;
-	list_iterate_safe(itr, save, &clients)
-	{
-		client_t* c;
-		c = list_get_entry(itr, client_t, node);
+	g_mumbleServer->ForAllMumbleClients([bwTop](client_t* c) {
+		// TODO: make c->username a shared_ptr and c->availableBandwidth a atomic and lastActivity an atomic
+		std::unique_lock _(c->m_clientMutex);
 		Log_debug("Client %s BW available %d", c->username, c->availableBandwidth);
 		c->availableBandwidth += maxBandwidth;
 		if (c->availableBandwidth > bwTop)
 			c->availableBandwidth = bwTop;
 
-		if (Timer_isElapsed(&c->lastActivity, 1000000LL * INACTIVITY_TIMEOUT))
+		// If we're not authenticated we don't want to allow a client to
+		// be able to take up a connection spot for long.
+		const int inactivityTime = c->authenticated ? INACTIVITY_TIMEOUT : 3;
+
+		if (Timer_isElapsed(&c->lastActivity, 1000000LL * inactivityTime))
 		{
 			/* No activity from client - assume it is lost and close. */
 			Log_info_client(c, "Timeout, closing.");
 			auto stream = c->stream;
-			stream->ScheduleCallback([stream]() {
+			stream->ScheduleCallback([stream]()
+			{
 				stream->Close();
 			});
 			// Client_free(c);
 		}
-	}
+
+		return false;
+	});
 	Ban_pruneBanned();
 }
 
@@ -264,7 +262,6 @@ int Client_add(fwRefContainer<net::TcpServerStream> stream, client_t** client)
 	init_list_entry(&newclient->tokens);
 
 	list_add_tail(&newclient->node, &clients);
-	clientcount++;
 
 	/* Send version message to client */
 	sendmsg = Msg_create(Version);
@@ -311,7 +308,10 @@ void Client_free(client_t* client)
 	/*if (client->ssl)
 		SSLi_free(client->ssl);
 	close(client->tcpfd);*/
-	clientcount--;
+	if (client->authenticated)
+	{
+		clientcount--;
+	}
 	if (client->release)
 		free(client->release);
 	if (client->os)
@@ -661,6 +661,7 @@ int Client_send_message_except_ver(client_t* client, message_t* msg, uint32_t ve
 
 bool_t checkDecrypt(client_t* client, const uint8_t* encrypted, uint8_t* plain, unsigned int len)
 {
+	std::unique_lock _(client->m_clientMutex);
 	if (CryptState_isValid(&client->cryptState) && CryptState_decrypt(&client->cryptState, encrypted, plain, len))
 		return true;
 
@@ -839,7 +840,7 @@ int Client_voiceMsg(client_t* client, uint8_t* data, int len)
 
 	eastl::fixed_set<client_t*, 256> listeningUsers;
 
-	if (!client->authenticated || client->mute || client->self_mute || !ch || ch->silent || len > UDP_MAX_PACKET_SIZE)
+	if (!client->authenticated || client->m_mute || client->self_mute || !ch || ch->silent || len > UDP_MAX_PACKET_SIZE)
 		goto out;
 
 	packetsize = 20 + 8 + 4 + len;

@@ -35,13 +35,115 @@
 
 #include "ClientRegistry.h"
 #include "console/Console.VariableHelpers.h"
+#include <memory>
+#include <mutex>
+#include <NetAddress.h>
 
-void Server_run();
-void Server_shutdown();
+#include "channel.h"
+#include "client.h"
 
-extern std::shared_ptr<ConVar<bool>> mumble_allowExternalConnections;
-inline std::unordered_set<int> g_clientIds;
-inline std::shared_mutex g_clientIdsMutex;
+class MumbleServer
+{
+private:
+	std::shared_mutex m_clientIdsMutex;
+	std::unordered_map<const int, client_t*> m_clientIds;
+
+	std::shared_mutex m_mumbleClientMutex;
+	std::unordered_map<uint32_t, client_t*> m_mumbleClients;
+
+	// all of the clients that have a UDP socket
+	std::shared_mutex m_socketMapMutex;
+	std::unordered_map<net::PeerAddress, client_t*> m_socketMap;
+
+	// all of the clients that don't have a udp socket yet
+	std::shared_mutex m_socketlessClientsMutex;
+	std::unordered_map<uint32_t, client_t*> m_socketlessClients;
+
+	std::shared_mutex m_mumbleChannelMutex;
+	std::unordered_map<uint32_t, channel_t*> m_mumbleChannels;
+
+
+	bool m_allowExternalConnections = false;
+	
+	MumbleServer()
+	{
+		static auto mumble_allowExternalConnections = std::make_shared<ConVar<bool>>("mumble_allowExternalConnections", ConVar_None, false, &m_allowExternalConnections);
+	}
+
+public:
+	bool AreExternalConnectionsAllowed() const
+	{
+		return m_allowExternalConnections;
+	}
+
+	bool IsServerIdUsed(const int serverId)
+	{
+		std::shared_lock _(m_clientIdsMutex);
+		return m_clientIds.find(serverId) != m_clientIds.end();
+	}
+
+	client_t* GetClientFromServerId(const int serverId)
+	{
+		std::shared_lock _(m_clientIdsMutex);
+		if (auto client = m_clientIds.find(serverId); client != m_clientIds.end())
+		{
+			return client->second;
+		}
+
+		return nullptr;
+	
+	}
+
+	void ResetServerId(const int serverId)
+	{
+		std::unique_lock _(m_clientIdsMutex);
+		m_clientIds.erase(serverId);
+	}
+
+	void RegisterClientToServerId(const int serverId, client_t* client)
+	{
+		std::unique_lock _(m_clientIdsMutex);
+		m_clientIds[serverId] = client;
+	}
+
+	client_t* GetClientFromAddress(const net::PeerAddress& addr)
+	{
+		std::shared_lock _(m_socketMap);
+		if (auto client = m_socketMap.find(addr); client != m_socketMap.end())
+		{
+			return client->second;
+		}
+
+		return nullptr;
+	}
+
+	template<typename TFn>
+	inline void ForAllMumbleClients(TFn&& cb)
+	{
+		std::shared_lock _(m_mumbleClientMutex);
+		for (auto& [session_id, client] : m_mumbleClients)
+		{
+			if (cb(client))
+			{
+				return;
+			}
+		}
+	}
+
+	template<typename TFn>
+	inline void ForAllSocketlessClients(TFn&& cb)
+	{
+		std::shared_lock _(m_socketlessClients);
+		for (const auto& [session_id, client] : m_socketlessClients)
+		{
+			if (cb(client))
+			{
+				return;
+			}
+		}
+	}
+};
+
 inline fwRefContainer<fx::ClientRegistry> g_clientRegistry;
 
 #endif

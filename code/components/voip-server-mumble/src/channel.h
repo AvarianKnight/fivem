@@ -35,13 +35,14 @@
 #include "list.h"
 #include "client.h"
 
-typedef struct channel
+class channel_t
 {
+public:
 	int id;
 	char* name;
 	char* desc;
 	char* password;
-	struct channel* parent;
+	uint32_t parent_id;
 	bool_t temporary, noenter, silent;
 	int position;
 	struct dlist node;
@@ -50,7 +51,24 @@ typedef struct channel
 	struct dlist flatlist_node;
 	struct dlist channel_links;
 	int linkcount;
-} channel_t;
+	
+	std::shared_mutex m_clientMutex;
+	std::set<uint32_t> m_clients;
+
+
+	void AddClient(uint32_t sessionId)
+	{
+		std::unique_lock _(m_clientMutex);
+		m_clients.insert(sessionId);
+	}
+
+	void RemoveClient(uint32_t sessionId)
+	{
+		std::unique_lock _(m_clientMutex);
+		m_clients.erase(sessionId);
+	}
+
+};
 
 typedef struct
 {

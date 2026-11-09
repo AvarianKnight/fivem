@@ -205,6 +205,11 @@ private:
 	NetLibrary();
 
 public:
+	std::string& GetToken()
+	{
+		return m_token; 
+	}
+
 	inline bool AreDownloadsComplete()
 	{
 		return m_connectionState >= CS_DOWNLOADCOMPLETE;

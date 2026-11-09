@@ -53,7 +53,6 @@ static channel_t* createChannel(int id, const char* name, const char* desc)
 	ch->name = strdup(name);
 	if (desc)
 		ch->desc = strdup(desc);
-	init_list_entry(&ch->subs);
 	init_list_entry(&ch->node);
 	init_list_entry(&ch->clients);
 	init_list_entry(&ch->flatlist_node);
@@ -77,67 +76,6 @@ static int findFreeId()
 			return id;
 	}
 	return -1;
-}
-
-#if 0
-/* Might be used when tree traversal becomes neccessary */
-static channel_t *first_subchannel(channel_t *ch)
-{
-	if (list_empty(&ch->subs))
-		return NULL;
-	else
-		return list_get_entry(list_get_first(&ch->subs), channel_t, node);
-}
-
-static channel_t *next_channel(channel_t *ch)
-{
-	if (list_get_next(&ch->node) == &list_get_entry(&ch->node, channel_t, node)->parent->subs)
-		return NULL;
-	else
-		return list_get_entry(list_get_next(&ch->node), channel_t, node);
-}
-#endif
-
-channel_t* Chan_iterate(channel_t** channelpptr)
-{
-	channel_t* ch = *channelpptr;
-
-	if (!list_empty(&channels))
-	{
-		if (ch == NULL)
-			ch = list_get_entry(list_get_first(&channels), channel_t, flatlist_node);
-		else
-		{
-			if (list_get_next(&ch->flatlist_node) == &channels)
-				ch = NULL;
-			else
-				ch = list_get_entry(list_get_next(&ch->flatlist_node), channel_t, flatlist_node);
-		}
-	}
-
-	*channelpptr = ch;
-	return ch;
-}
-
-channel_t* Chan_iterate_siblings(channel_t* parent, channel_t** channelpptr)
-{
-	channel_t* ch = *channelpptr;
-
-	if (!list_empty(&parent->subs))
-	{
-		if (ch == NULL)
-			ch = list_get_entry(list_get_first(&parent->subs), channel_t, node);
-		else
-		{
-			if (list_get_next(&ch->node) == &parent->subs)
-				ch = NULL;
-			else
-				ch = list_get_entry(list_get_next(&ch->node), channel_t, node);
-		}
-	}
-
-	*channelpptr = ch;
-	return ch;
 }
 
 void Chan_init()
@@ -291,13 +229,6 @@ void Chan_freeChannel(channel_t* ch)
 	if (ch->password)
 		free(ch->password);
 	free(ch);
-}
-
-void Chan_addChannel(channel_t* parent, channel_t* ch)
-{
-	list_add_tail(&ch->node, &parent->subs);
-	ch->parent = parent;
-	list_add_tail(&ch->flatlist_node, &channels);
 }
 
 int Chan_userLeave(client_t* client)

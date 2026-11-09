@@ -58,7 +58,7 @@
 #define TCP_BUFSIZE 8192
 #define INACTIVITY_TIMEOUT 60 /* Seconds */
 #define MAX_TOKENSIZE 64
-#define MAX_TOKENS 32
+#define MAX_TOKENS 1
 #define KEY_LENGTH sizeof(uint16_t) + 4 * sizeof(uint32_t)
 
 #define IS_AUTH(_a_) ((_a_)->authenticated)
@@ -68,9 +68,12 @@
 #define strnicmp strncasecmp
 #endif
 
-typedef struct
+class client_t
 {
+public:
 	fwRefContainer<net::TcpServerStream> stream;
+	// used any time we read/write to the client
+	std::shared_mutex m_clientMutex;
 	bool_t SSLready;
 	bool_t shutdown_wait;
 	cryptState_t cryptState;
@@ -84,7 +87,8 @@ typedef struct
 	int sessionId;
 	uint8_t key[KEY_LENGTH];
 	char* username;
-	bool_t bUDP, authenticated, deaf, mute, self_deaf, self_mute, recording;
+	std::atomic<bool> m_mute;
+	bool_t bUDP, authenticated, deaf, self_deaf, self_mute, recording;
 	char *os, *release, *os_version;
 	uint32_t version;
 	int availableBandwidth;
@@ -105,13 +109,7 @@ typedef struct
 	uint32_t UDPPackets, TCPPackets;
 	fx::UdpInterceptor* interceptor;
 	uint32_t numFailedCrypt;
-} client_t;
-
-typedef struct
-{
-	int codec, count;
-	struct dlist node;
-} codec_t;
+};
 
 typedef struct
 {
@@ -121,8 +119,8 @@ typedef struct
 
 void Client_init();
 int Client_getfds(struct pollfd* pollfds);
-bool Client_is_player_muted(const char* namePrefix, size_t len);
-void Client_set_player_muted(const char* namePrefix, size_t len, bool muted);
+bool Client_is_player_muted(const int serverId);
+void Client_set_player_muted(const int serverId, bool muted);
 void Client_janitor();
 int Client_add(fwRefContainer<net::TcpServerStream> stream, client_t** client);
 int Client_read_fd(int fd);

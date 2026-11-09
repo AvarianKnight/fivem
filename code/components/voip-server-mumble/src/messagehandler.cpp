@@ -52,6 +52,7 @@
 #define MAX_USERNAME 208
 
 extern channel_t* defaultChan;
+extern std::shared_ptr<MumbleServer> g_mumbleServer;
 
 static void sendServerReject(client_t* client, const char* reason, MumbleProto::Reject::RejectType type)
 {
@@ -190,7 +191,7 @@ void Mh_handle_message(client_t* client, message_t* msg)
 				goto disconnect;
 			}
 
-			if (!mumble_allowExternalConnections->GetValue())
+			if (!g_mumbleServer->AreExternalConnectionsAllowed())
 			{
 				char buf[64];
 				if (!client->os_version || !client->release || strcmp(client->os_version, "Cfx/Embedded") != 0 || strcmp(client->release, "CitizenFX Client") != 0)
@@ -207,14 +208,11 @@ void Mh_handle_message(client_t* client, message_t* msg)
 					goto disconnect;
 				}
 
+				if (g_mumbleServer->IsServerIdUsed(playerId))
 				{
-					std::shared_lock lock(g_clientIdsMutex);
-					if (g_clientIds.find(playerId) != g_clientIds.end())
-					{
-						snprintf(buf, 64, "Player id already in use");
-						sendServerReject(client, buf, MumbleProto::Reject_RejectType_UsernameInUse);
-						goto disconnect;
-					}
+					snprintf(buf, 64, "Player id already in use");
+					sendServerReject(client, buf, MumbleProto::Reject_RejectType_UsernameInUse);
+					goto disconnect;
 				}
 
 				auto netClient = g_clientRegistry->GetClientByNetID(playerId);
@@ -225,10 +223,7 @@ void Mh_handle_message(client_t* client, message_t* msg)
 					goto disconnect;
 				}
 
-				{
-					std::unique_lock lock(g_clientIdsMutex);
-					g_clientIds.insert(playerId);
-				}
+				g_mumbleServer->RegisterClientToServerId(playerId, client);
 			}
 
 			client->authenticated = true;
@@ -348,7 +343,7 @@ void Mh_handle_message(client_t* client, message_t* msg)
 				{
 					sendmsg->payload.userState->set_deaf(true);
 				}
-				if (client_itr->mute)
+				if (client_itr->m_mute)
 				{
 					sendmsg->payload.userState->set_mute(true);
 				}
@@ -499,8 +494,8 @@ void Mh_handle_message(client_t* client, message_t* msg)
 			}
 			if (msg->payload.userState->has_mute())
 			{
-				target->mute = msg->payload.userState->mute();
-				if (!target->mute)
+				target->m_mute = msg->payload.userState->mute();
+				if (!target->m_mute)
 				{
 					msg->payload.userState->set_deaf(false);
 					target->deaf = false;
