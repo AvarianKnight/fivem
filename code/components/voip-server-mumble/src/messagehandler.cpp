@@ -103,7 +103,7 @@ void Mh_handle_message(client_t* client, message_t* msg)
 	channel_t* ch_itr = NULL;
 	client_t *client_itr, *target;
 
-	if (!client->authenticated && !(msg->messageType == Authenticate || msg->messageType == Version))
+	if (!IS_AUTH(client) && !(msg->messageType == Authenticate || msg->messageType == Version))
 	{
 		goto out;
 	}
@@ -127,7 +127,8 @@ void Mh_handle_message(client_t* client, message_t* msg)
 		{
 			Log_debug("Authenticate message received");
 
-			if (IS_AUTH(client) || !msg->payload.authenticate->username().c_str())
+			// TODO: Remove? We shouldn't need to do this
+			if (client->m_authenticated || !msg->payload.authenticate->username().c_str())
 			{
 				/* Authenticate message might be sent when a tokens are changed by the user.*/
 				Client_token_free(client); /* Clear the token list */
@@ -226,7 +227,7 @@ void Mh_handle_message(client_t* client, message_t* msg)
 				g_mumbleServer->RegisterClientToServerId(playerId, client);
 			}
 
-			client->authenticated = true;
+			client->m_authenticated = true;
 
 			/* Name */
 			client->username = strdup(msg->payload.authenticate->username().c_str());
@@ -331,25 +332,21 @@ void Mh_handle_message(client_t* client, message_t* msg)
 
 				client_itr->isSuppressed = ((channel_t*)client_itr->channel)->silent;
 
-				if (client_itr->self_deaf)
+				if (client_itr->m_selfDeaf)
 				{
 					sendmsg->payload.userState->set_self_deaf(true);
 				}
-				if (client_itr->self_mute)
+				if (client_itr->m_selfMute)
 				{
 					sendmsg->payload.userState->set_self_mute(true);
 				}
-				if (client_itr->deaf)
+				if (client_itr->m_deaf)
 				{
 					sendmsg->payload.userState->set_deaf(true);
 				}
 				if (client_itr->m_mute)
 				{
 					sendmsg->payload.userState->set_mute(true);
-				}
-				if (client_itr->recording)
-				{
-					sendmsg->payload.userState->set_recording(true);
 				}
 				for (int channelId : ChannelListener::getListenedChannelsForUser(client_itr))
 				{
@@ -486,8 +483,8 @@ void Mh_handle_message(client_t* client, message_t* msg)
 
 			if (msg->payload.userState->has_deaf())
 			{
-				target->deaf = msg->payload.userState->deaf();
-				if (target->deaf)
+				target->m_deaf = msg->payload.userState->deaf();
+				if (target->m_deaf)
 				{
 					msg->payload.userState->set_mute(true);
 				}
@@ -498,43 +495,25 @@ void Mh_handle_message(client_t* client, message_t* msg)
 				if (!target->m_mute)
 				{
 					msg->payload.userState->set_deaf(false);
-					target->deaf = false;
+					target->m_deaf = false;
 				}
 			}
 			if (msg->payload.userState->has_self_deaf())
 			{
-				client->self_deaf = msg->payload.userState->self_deaf();
-				if (client->self_deaf)
+				client->m_selfDeaf = msg->payload.userState->self_deaf();
+				if (client->m_selfDeaf)
 				{
 					msg->payload.userState->set_self_mute(true);
 				}
 			}
 			if (msg->payload.userState->has_self_mute())
 			{
-				client->self_mute = msg->payload.userState->self_mute();
-				if (!client->self_mute)
+				client->m_selfMute = msg->payload.userState->self_mute();
+				if (!client->m_selfMute)
 				{
 					msg->payload.userState->set_self_deaf(false);
-					client->self_deaf = false;
+					client->m_selfDeaf = false;
 				}
-			}
-			if (msg->payload.userState->has_recording() && msg->payload.userState->recording() != client->recording)
-			{
-				client->recording = msg->payload.userState->recording();
-				char* message;
-				uint32_t* tree_id;
-
-				message = (char*)Memory_safeMalloc(1, strlen(client->username) + 32);
-				sendmsg = Msg_create(TextMessage);
-				sendmsg->payload.textMessage->add_tree_id(0);
-				if (client->recording)
-					sprintf(message, "User %s started recording", client->username);
-				else
-					sprintf(message, "User %s stopped recording", client->username);
-				sendmsg->payload.textMessage->set_message(message);
-				Client_send_message_except_ver(NULL, sendmsg, ~0x010203);
-				free(message);
-				sendmsg = NULL;
 			}
 			if (msg->payload.userState->has_channel_id())
 			{
@@ -658,7 +637,7 @@ void Mh_handle_message(client_t* client, message_t* msg)
 						{
 							client_t* c;
 							c = list_get_entry(itr, client_t, chan_node);
-							if (c != client && !c->deaf && !c->self_deaf)
+							if (c != client && !c->m_deaf && !c->m_selfDeaf)
 							{
 								Msg_inc_ref(msg);
 								Client_send_message(c, msg);
@@ -681,7 +660,7 @@ void Mh_handle_message(client_t* client, message_t* msg)
 							continue;
 						if (itr->sessionId == msg->payload.textMessage->session(i))
 						{
-							if (!itr->deaf && !itr->self_deaf)
+							if (!itr->m_deaf && !itr->m_selfDeaf)
 							{
 								Msg_inc_ref(msg);
 								Client_send_message(itr, msg);
@@ -770,7 +749,7 @@ void Mh_handle_message(client_t* client, message_t* msg)
 			Client_send_message(client, msg);
 			break;
 		case UDPTunnel:
-			client->bUDP = false;
+			client->m_hasUdp = false;
 			Client_voiceMsg(client, (uint8_t*)msg->payload.UDPTunnel->packet().data(), msg->payload.UDPTunnel->packet().size());
 			break;
 		case ChannelState:

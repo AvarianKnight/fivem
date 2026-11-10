@@ -34,61 +34,80 @@
 #include <TcpServer.h>
 
 #include <stdint.h>
-#include <sys/types.h>
-#include <errno.h> /* errno */
 
 #include "list.h"
 #include "types.h"
 #include "messages.h"
 #include "crypt.h"
 #include "timer.h"
-#include "pds.h"
-#include "ssl.h"
-
-#include <deque>
 
 #include <UdpInterceptor.h>
-
 #include <NetAddress.h>
-
 #include "StreamByteReader.h"
 
-#define UDP_MAX_PACKET_SIZE 1024
-#define READ_BUFFER_SIZE (8192 + 6 + 4) * 2
-#define TCP_BUFSIZE 8192
-#define INACTIVITY_TIMEOUT 60 /* Seconds */
+// The maximum size a UDP packet can be as defined by the mumble spec
+constexpr uint16_t UDP_MAX_PACKET_SIZE = 1024;
+
+// The maximum size the receive buffer should be for TCP for incoming and outgoing commands
+constexpr uint16_t TCP_BUFSIZE = 8192;
+
+constexpr uint16_t READ_BUFFER_SIZE = (TCP_BUFSIZE + 6 + 4) * 2;
+
+// NOTE: This was reduced from 60 -> 15 since we do frequent pings on the client
+// The maximum amount of time in seconds a client can be inactive before getting removed
+constexpr uint16_t INACTIVITY_TIMEOUT = 15;
+
+constexpr uint16_t MAX_TOKENSIZE = 64;
+
+// TODO: have it so that the client sends its connection token
+constexpr uint16_t MAX_TOKENS = 1;
+
 #define MAX_TOKENSIZE 64
 #define MAX_TOKENS 1
 #define KEY_LENGTH sizeof(uint16_t) + 4 * sizeof(uint32_t)
 
-#define IS_AUTH(_a_) ((_a_)->authenticated)
+#define IS_AUTH(_a_) ((_a_)->m_authenticated)
 
 #ifdef __linux__
 #define stricmp strcasecmp
 #define strnicmp strncasecmp
 #endif
 
+struct Version 
+{
+	char *os, *release, *os_version;
+	
+};
+
 class client_t
 {
 public:
 	fwRefContainer<net::TcpServerStream> stream;
+	uint32_t sessionId;
 	// used any time we read/write to the client
 	std::shared_mutex m_clientMutex;
-	bool_t SSLready;
-	bool_t shutdown_wait;
+	
+	std::atomic<bool> m_hasUdp = false;
+	std::atomic<bool> m_mute = false;
+	std::atomic<bool> m_authenticated = false;
+	std::atomic<bool> m_deaf = false;
+	std::atomic<bool> m_selfDeaf = false;
+	std::atomic<bool> m_selfMute = false;
+	
+	std::atomic<bool> m_shouldShutdown = false;
+	
 	cryptState_t cryptState;
-	bool_t readBlockedOnWrite, writeBlockedOnRead;
+	
 	net::PeerAddress remote_tcp;
 	net::PeerAddress remote_udp;
+	
 	uint8_t rcvbuf[READ_BUFFER_SIZE];
 	net::StreamByteReader streamByteReader{ rcvbuf, READ_BUFFER_SIZE };
 	uint8_t txbuf[TCP_BUFSIZE];
 	uint32_t rxcount, txcount, txsize;
-	int sessionId;
+	
 	uint8_t key[KEY_LENGTH];
 	char* username;
-	std::atomic<bool> m_mute;
-	bool_t bUDP, authenticated, deaf, self_deaf, self_mute, recording;
 	char *os, *release, *os_version;
 	uint32_t version;
 	int availableBandwidth;
@@ -108,7 +127,6 @@ public:
 	float UDPPingAvg, UDPPingVar, TCPPingAvg, TCPPingVar;
 	uint32_t UDPPackets, TCPPackets;
 	fx::UdpInterceptor* interceptor;
-	uint32_t numFailedCrypt;
 };
 
 typedef struct

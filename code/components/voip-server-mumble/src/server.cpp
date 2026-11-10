@@ -308,12 +308,12 @@ static InitFunction initFunction([]()
 				});
 
 				// close stream if shutting down or if the message was not successfully parsed
-				if (!result || client->shutdown_wait)
+				if (!result || client->m_shouldShutdown)
 				{
 					stream->Close();
 				}
 
-				if (client->authenticated)
+				if (client->m_authenticated)
 				{
 					Timer_restart(&client->lastActivity);
 				}
@@ -488,7 +488,7 @@ static InitFunction initFunction([]()
 
 			*intercepted = true;
 
-			client->bUDP = true;
+			client->m_hasUdp = true;
 			len -= 4; /* Adjust for crypt header */
 			auto msgType = (UDPMessageType_t)((buffer[0] >> 5) & 0x7);
 

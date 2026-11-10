@@ -51,6 +51,8 @@
 #include "ChannelListener.h"
 
 #include <EASTL/fixed_set.h>
+
+#include "pds.h"
 #include "server.h"
 
 extern std::shared_ptr<MumbleServer> g_mumbleServer;
@@ -133,7 +135,7 @@ void Client_janitor()
 
 		// If we're not authenticated we don't want to allow a client to
 		// be able to take up a connection spot for long.
-		const int inactivityTime = c->authenticated ? INACTIVITY_TIMEOUT : 3;
+		const int inactivityTime = c->m_authenticated ? INACTIVITY_TIMEOUT : 3;
 
 		if (Timer_isElapsed(&c->lastActivity, 1000000LL * inactivityTime))
 		{
@@ -234,8 +236,6 @@ int Client_add(fwRefContainer<net::TcpServerStream> stream, client_t** client)
 
 	*client = newclient;
 
-	newclient->numFailedCrypt = 0;
-
 	newclient->stream = stream;
 	// memcpy(&newclient->remote_tcp, remote, sizeof(struct sockaddr_storage));
 	newclient->remote_tcp = stream->GetPeerAddress();
@@ -279,7 +279,7 @@ void Client_free(client_t* client)
 	struct dlist *itr, *save;
 	message_t* sendmsg;
 
-	if (client->authenticated)
+	if (client->m_authenticated)
 	{
 		int leave_id;
 		leave_id = Chan_userLeave(client);
@@ -308,7 +308,7 @@ void Client_free(client_t* client)
 	/*if (client->ssl)
 		SSLi_free(client->ssl);
 	close(client->tcpfd);*/
-	if (client->authenticated)
+	if (client->m_authenticated)
 	{
 		clientcount--;
 	}
@@ -347,7 +347,7 @@ int Client_getPlayerId(client_t* client, char* username)
 void Client_close(client_t* client)
 {
 	// SSLi_shutdown(client->ssl);
-	client->shutdown_wait = true;
+	client->m_shouldShutdown = true;
 }
 
 void Client_disconnect_all()
@@ -378,7 +378,7 @@ int Client_read(client_t* client)
 		return Client_write(client);
 	}
 
-	if (client->shutdown_wait) {
+	if (client->m_shouldShutdown) {
 		Client_free(client);
 		return 0;
 	}
@@ -537,7 +537,7 @@ int Client_send_message_ver(client_t* client, message_t* msg, uint32_t version)
 
 int Client_send_message(client_t* client, message_t* msg)
 {
-	if (!client->authenticated && msg->messageType != Version)
+	if (!client->m_authenticated && msg->messageType != Version)
 	{
 		Msg_free(msg);
 		return 0;
@@ -786,7 +786,7 @@ int Client_read_udp(int udpsock)
 		goto out;
 	}
 
-	itr->bUDP = true;
+	itr->m_hasUdp = true;
 	len -= 4; /* Adjust for crypt header */
 	msgType = (UDPMessageType_t)((buffer[0] >> 5) & 0x7);
 
@@ -812,7 +812,7 @@ out:
 
 static inline void Client_send_voice(client_t* src, client_t* dst, uint8_t* data, int len, int poslen)
 {
-	if (IS_AUTH(dst) && dst != src && !dst->deaf && !dst->self_deaf)
+	if (dst->m_authenticated && dst != src && !dst->m_deaf && !dst->m_selfDeaf)
 	{
 		if (poslen > 0 && /* Has positional data */
 			src->context != NULL && dst->context != NULL && /* ...both source and destination has context */
@@ -840,7 +840,7 @@ int Client_voiceMsg(client_t* client, uint8_t* data, int len)
 
 	eastl::fixed_set<client_t*, 256> listeningUsers;
 
-	if (!client->authenticated || client->m_mute || client->self_mute || !ch || ch->silent || len > UDP_MAX_PACKET_SIZE)
+	if (!client->m_authenticated || client->m_mute || client->m_selfMute || !ch || ch->silent || len > UDP_MAX_PACKET_SIZE)
 		goto out;
 
 	packetsize = 20 + 8 + 4 + len;
@@ -1045,21 +1045,10 @@ int Client_send_udp(client_t* client, uint8_t* data, int len)
 
 	int udpsock = 0; // (client->remote_udp.GetAddressFamily() == AF_INET) ? udpsocks[0] : udpsocks[(hasv4) ? 1 : 0];
 
-	if (CryptState_isValid(&client->cryptState) && client->bUDP)
+	if (CryptState_isValid(&client->cryptState) && client->m_hasUdp)
 	{
-#if defined(__LP64__)
-		buf = mbuf = (uint8_t*)Memory_safeMalloc(1, len + 4 + 16);
-		buf += 4;
-#else
 		mbuf = buf = (uint8_t*)Memory_safeMalloc(1, len + 4);
-#endif
 		CryptState_encrypt(&client->cryptState, data, buf, len);
-
-		/*#if defined(__NetBSD__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__APPLE__)
-					sendto(udpsock, buf, len + 4, 0, (struct sockaddr *)&client->remote_udp, client->remote_tcp.ss_len);
-		#else
-					sendto(udpsock, (char*)buf, len + 4, 0, (struct sockaddr *)&client->remote_udp, sizeof(struct sockaddr_storage));
-		#endif*/
 
 		client->interceptor->Send(client->remote_udp, buf, len + 4);
 
