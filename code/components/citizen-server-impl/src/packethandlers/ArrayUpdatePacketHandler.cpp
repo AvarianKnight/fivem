@@ -7,6 +7,9 @@
 
 #include "packethandlers/ArrayUpdatePacketHandler.h"
 
+#include <GameServer.h>
+#include <ClientDropReasons.h>
+
 #include "ArrayUpdate.h"
 #include "ByteReader.h"
 #include "KeyedRateLimiter.h"
@@ -20,6 +23,7 @@ bool fx::ServerDecorators::ArrayUpdatePacketHandler::Process(fx::ServerInstanceB
 
 	if (!arrayUpdateRateLimiter->Consume(client->GetNetId()))
 	{
+		instance->GetComponent<fx::GameServer>()->DropClientWithReason(client, fx::serverDropResourceName, fx::ClientDropReason::SERVER_PACKET_OVERFLOW, "Reliable arrayUpdate overflow.");
 		return false;
 	}
 

@@ -45,17 +45,11 @@ public:
 
 	void UnregisterTarget(int id) override;
 
-	void HandlePacket(int source, std::string_view data) override;
-
 	void HandlePacketV2(int source, const net::packet::ReassembledEventV2& packet) override;
 
 	EventReassemblyAckResult HandlePacketV2Ack(int source, const net::packet::ReassembledEventV2& packet, EventReassemblyAckInfo* info = nullptr) override;
 
 	void SetAckDiagnosticsEnabled(bool enabled) override;
-
-#ifndef IS_FXSERVER
-	void TriggerEvent(int target, std::string_view eventName, std::string_view eventPayload, int bytesPerSecond) override;
-#endif
 
 	void TriggerEventV2(int target, std::string_view eventName, std::string_view eventPayload, int bytesPerSecond) override;
 
@@ -122,7 +116,6 @@ private:
 	void NetworkTickSendList(const std::chrono::milliseconds& timeNow, const std::chrono::milliseconds& dT, SendList& sendList, uint32_t fragmentSize, size_t& fragmentBudget, EventId& nextEvent, bool v2 = false);
 
 private:
-	SendList m_sendList;
 	SendList m_sendListV2;
 
 	std::unordered_map<int, std::unordered_map<EventId, std::shared_ptr<ReceiveEvent>>> m_receiveList;
@@ -273,98 +266,9 @@ void EventReassemblyComponentImpl::UnregisterTarget(const int id)
 		// drop any sends/receives from this target
 		m_receiveList.erase(id);
 
-		UnregisterSendList(id, m_sendList);
 		UnregisterSendList(id, m_sendListV2, true);
 	}
 }
-
-#ifndef IS_FXSERVER
-void EventReassemblyComponentImpl::TriggerEvent(const int target, const std::string_view eventName, const std::string_view eventPayload, int bytesPerSecond)
-{
-	const auto timeNow = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now().time_since_epoch());
-
-	// default BPS if it's 0/negative so we won't end up with weird calculation artifacts later on
-	if (bytesPerSecond <= 0)
-	{
-		bytesPerSecond = 25000;
-	}
-
-	// skip oversized packets
-	uint32_t totalSize = eventPayload.size() + eventName.size() + sizeof(uint16_t);
-	if (totalSize >= net::packet::ReassembledEvent::kMaxPacketSize)
-	{
-		trace("Event %s is too large to be sent. Total size: %u, max size: %u.\n", eventName, totalSize, net::packet::ReassembledEvent::kMaxPacketSize);
-		return;
-	}
-
-	// 10+MB/s bitrate to send 50+MB object.
-	if (bytesPerSecond >= 10000000 && eventPayload.size() >= 50000000)
-	{
-		static std::chrono::milliseconds lastWarning{ 0 };
-		if (timeNow - lastWarning >= std::chrono::seconds(5))
-		{
-			trace("Warning: sending large event %s (%u bytes) with almost unrestricted bitrate (%u b/s). This may cause performance issues. Consider decreasing objects sizes or bitrate.\n",
-			eventName, eventPayload.size(), bytesPerSecond);
-			lastWarning = timeNow;
-		}
-	}
-
-	std::set<int> targets;
-
-	if (target == -1)
-	{
-		std::shared_lock _(m_listMutex);
-		for (const auto& currTarget : m_targets)
-		{
-			targets.insert(currTarget.first);
-		}
-	}
-	else
-	{
-		std::shared_lock _(m_listMutex);
-
-		if (m_targets.find(target) == m_targets.end())
-		{
-			return;
-		}
-
-		targets.insert(target);
-	}
-
-	rl::MessageBuffer payloadBuf(eventName.size() + sizeof(uint16_t) + eventPayload.size());
-
-	payloadBuf.Write(16, static_cast<uint32_t>(eventName.size()));
-	payloadBuf.WriteBits(eventName.data(), eventName.size() * 8);
-
-	memcpy(payloadBuf.GetBuffer().data() + (payloadBuf.GetCurrentBit() / 8), eventPayload.data(), eventPayload.size());
-
-	auto sendPacket = std::make_shared<SendEvent>();
-	sendPacket->bytesPerSecond = bytesPerSecond;
-	sendPacket->targets = targets;
-	sendPacket->sendPayload = std::move(payloadBuf.GetBuffer());
-
-	auto packetCount = sendPacket->sendPayload.size() / net::packet::ReassembledEvent::kFragmentSize;
-
-	if ((sendPacket->sendPayload.size() % net::packet::ReassembledEvent::kFragmentSize) != 0)
-	{
-		packetCount += 1;
-	}
-
-	for (auto target : targets)
-	{
-		auto targetData = std::make_shared<SendEvent::PerTargetData>();
-		targetData->ackBits.resize(packetCount);
-		targetData->sentBits.resize(packetCount);
-		targetData->lastSend = std::chrono::milliseconds{ 0 };
-		targetData->lastProgress = timeNow;
-
-		sendPacket->targetData[target] = targetData;
-	}
-
-	std::unique_lock lock(m_listMutex);
-	m_sendList.insert({ m_eventId++, sendPacket });
-}
-#endif
 
 void EventReassemblyComponentImpl::TriggerEventV2(const int target, std::string_view eventName, std::string_view eventPayload, int bytesPerSecond)
 {
@@ -781,7 +685,6 @@ void EventReassemblyComponentImpl::NetworkTick()
 		static constexpr size_t kMaxFragmentsPerNetworkTick = 1024;
 		size_t fragmentBudget = kMaxFragmentsPerNetworkTick;
 
-		NetworkTickSendList(timeNow, dT, m_sendList, net::packet::ReassembledEvent::kFragmentSize, fragmentBudget, m_nextSendEvent);
 		NetworkTickSendList(timeNow, dT, m_sendListV2, net::packet::ReassembledEventV2::kFragmentSize, fragmentBudget, m_nextSendEventV2, true);
 
 		static constexpr std::chrono::milliseconds gcInterval{ 30000 };
@@ -826,213 +729,6 @@ void EventReassemblyComponentImpl::NetworkTick()
 			}
 		}
 	}
-}
-
-/// <summary>
-/// Called when a packet is received from the network endpoint
-/// </summary>
-/// <param name="source">net id from where we received this packet, the server net id is always 0 on the client</param>
-/// <param name="data">The packet data we received</param>
-void EventReassemblyComponentImpl::HandlePacket(int source, std::string_view data)
-{
-#ifndef IS_FXSERVER
-	rl::MessageBufferView buffer(net::Span<uint8_t>(const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(data.data())), static_cast<size_t>(data.size())));
-
-	EventPacket packet;
-	if (!packet.Parse(buffer))
-	{
-		return;
-	}
-
-	// packet that has no total amount of packet is invalid
-	if (packet.totalPackets == 0)
-	{
-		return;
-	}
-
-	if (packet.packetIdx >= packet.totalPackets)
-	{
-		return;
-	}
-
-	if (packet.IsAck())
-	{
-		// received a ack packet to indicate the remote side received a payload packet
-		std::unique_lock lock(m_listMutex);
-		auto entryIt = m_sendList.find(packet.eventId);
-		if (entryIt != m_sendList.end())
-		{
-			std::shared_ptr<SendEvent> sendData = entryIt->second;
-
-			auto targetDataIt = sendData->targetData.find(source);
-
-			if (targetDataIt != sendData->targetData.end() && targetDataIt->second)
-			{
-				auto& targetData = targetDataIt->second;
-				auto& ackBits = targetData->ackBits;
-
-				if (packet.totalPackets == ackBits.size() && packet.packetIdx < ackBits.size() && targetData->sentBits[packet.packetIdx])
-				{
-					// marks the packetIdx (0, ackBitsSize] as arrived
-					if (!ackBits[packet.packetIdx])
-					{
-						ackBits.set(packet.packetIdx, true);
-						++targetData->acknowledgedPackets;
-						targetData->lastProgress = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now().time_since_epoch());
-					}
-				}
-			}
-		}
-	}
-	else
-	{
-		// queue event if we are 'full'
-		bool hasAll = false;
-		std::shared_ptr<ReceiveEvent> receiveData;
-		{
-			std::unique_lock lock(m_listMutex);
-			// check if there is already a pending event with this id from the remote side
-			auto clientIt = m_receiveList.find(source);
-			std::unordered_map<EventId, std::shared_ptr<ReceiveEvent>>* clientReceiveMap;
-			if (clientIt == m_receiveList.end())
-			{
-				clientReceiveMap = &m_receiveList.insert({ source, std::unordered_map<EventId, std::shared_ptr<ReceiveEvent>>{} }).first->second;
-			}
-			else
-			{
-				clientReceiveMap = &clientIt->second;
-			}
-
-			auto entryIt = clientReceiveMap->find(packet.eventId);
-			if (entryIt == clientReceiveMap->end())
-			{
-				// targets are protected by m_listMutex as well
-				auto target = m_targets.find(source);
-				if (target == m_targets.end())
-				{
-					// discard packet when its received from a none registered target
-					return;
-				}
-
-				switch (target->second.maxPendingEvents)
-				{
-					case 0:
-						// more then maxPendingEvents are not accepted at the same time
-						return;
-					case 0xFF:
-						// when maxPendingEvents is set to 255 the target has infinite amount of events
-						// used on the client side for the remote server
-						break;
-					default:
-						--target->second.maxPendingEvents;
-						break;
-				}
-
-				// started receiving a new event from remote
-				receiveData = std::make_shared<ReceiveEvent>();
-				// the remote defines the amount of packets that the event will be split to
-				receiveData->ackedBits.resize(packet.totalPackets);
-				receiveData->source = source;
-				receiveData->completed = false;
-				receiveData->timeLastAck = std::chrono::milliseconds{ 0 };
-				receiveData->lastActivity = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now().time_since_epoch());
-
-				clientReceiveMap->insert({ packet.eventId, receiveData });
-			}
-			else
-			{
-				// received some payload for this event already from the remote
-				receiveData = entryIt->second;
-			}
-
-			// note down as acked
-			auto& ackBits = receiveData->ackedBits;
-
-			if (packet.totalPackets != ackBits.size())
-			{
-				return;
-			}
-
-			// packetIdx (0, ackBitsSize] is the relative index of the packet inside the event to receive
-			bool ackedPacket = ackBits[packet.packetIdx];
-
-			// Event has already been completed or acked: just send an ACK.
-			if (receiveData->source == source && (receiveData->completed || ackedPacket))
-			{
-				// TODO: why allocate a std::vector with 1536 byte when this has a maximum of 108 bit
-
-				uint8_t buf[1536];
-				rl::MessageBufferView view(net::Span<uint8_t>(buf, 1536));
-				// thisBytes = 0 makes sure the receive ack to remote does not repeat the packet payload and only the meta data.
-				packet.thisBytes = 0;
-				packet.Unparse(view);
-
-				m_sink->SendPacket(source, std::string_view{ reinterpret_cast<char*>(buf), view.GetDataLength() });
-				receiveData->timeLastAck = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now().time_since_epoch());
-			}
-			// Still rebuilding event...,
-			// receiveData->source == source is always true
-			else if (receiveData->source == source)
-			{
-				ackBits.set(packet.packetIdx, true);
-				++receiveData->receivedPackets;
-				receiveData->lastActivity = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now().time_since_epoch());
-
-				// copy the payload from the packet to our ReceiveEvent to assemble it when all data is received
-				{
-					auto newPayload = std::unique_ptr<uint8_t[]>(new uint8_t[packet.thisBytes]);
-					memcpy(newPayload.get(), packet.payload.data(), packet.thisBytes);
-
-					receiveData->packetData[packet.packetIdx] = { size_t(packet.thisBytes), std::move(newPayload) };
-				}
-
-				// send ack
-				{
-					// TODO: why allocate a std::vector with 1536 byte when this has a maximum of 108 bit
-					uint8_t buf[1536];
-					rl::MessageBufferView view(net::Span<uint8_t>(buf, 1536));
-					// thisBytes = 0 makes sure the receive ack to remote does not repeat the packet payload and only the meta data.
-					packet.thisBytes = 0;
-					packet.Unparse(view);
-
-					m_sink->SendPacket(source, std::string_view{ (char*)buf, view.GetDataLength() });
-					receiveData->timeLastAck = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now().time_since_epoch());
-				}
-
-				hasAll = receiveData->receivedPackets == ackBits.size();
-
-				if (hasAll)
-				{
-					// marks the ReceiveEvent as completed to remove it after 2 minutes from memory
-					receiveData->completed = true;
-
-					// the client handles the server as id 0 and there no limiting is required
-					if (source != 0)
-					{
-						// targets are protected by m_listMutex as well
-						const auto target = m_targets.find(source);
-						if (target != m_targets.end() && target->second.maxPendingEvents != 0xFF)
-						{
-							// count up max pending event count, because a event is fully received
-							++target->second.maxPendingEvents;
-						}
-					}
-
-					// TODO: remove at least the payload of the fully received packet from the memory to keep the meta data to discard the duplicate packets
-
-					// Cleanup will now happen in NetworkTick to prevent any lingering packets from recreating
-					// the ReceiveEvent.
-					// m_receiveList.erase({ source, packet.eventId });
-				}
-			}
-		}
-
-		if (hasAll && receiveData != nullptr)
-		{
-			HandleReceivedPacket(source, receiveData, net::packet::ReassembledEvent::kFragmentSize);
-		}
-	}
-#endif
 }
 
 /// <summary>

@@ -4133,6 +4133,12 @@ void ServerGameState::GetFreeObjectIds(const fx::ClientSharedPtr& client, uint8_
 	auto [lock, data] = GetClientData(this, client);
 	std::unique_lock objectIdsLock(m_objectIdsMutex);
 
+	// TODO: way to actually set this, this should just be a large enough value as is
+	if (data->objectIds.size() > 256)
+	{
+		return;
+	}
+
 	uint16_t id = 1;
 
 	for (uint8_t i = 0; i < numIds; i++)

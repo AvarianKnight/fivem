@@ -30,6 +30,8 @@ enum class ClientDropReason: uint32_t
 	ONE_SYNC_TOO_MANY_MISSED_FRAMES,
 	// too many net game events set in a short amount of time.
 	NET_GAME_EVENT_RATE_LIMIT,
+	// too many packets sent across packet handlers
+	SERVER_PACKET_OVERFLOW
 };
 
 constexpr const char* clientDropResourceName = "__cfx_internal:client";

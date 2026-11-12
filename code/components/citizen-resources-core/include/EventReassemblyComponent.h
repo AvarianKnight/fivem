@@ -47,17 +47,11 @@ public:
 
 	virtual void UnregisterTarget(int id) = 0;
 
-	virtual void HandlePacket(int source, std::string_view data) = 0;
-
 	virtual void HandlePacketV2(int source, const net::packet::ReassembledEventV2& packet) = 0;
 
 	virtual EventReassemblyAckResult HandlePacketV2Ack(int source, const net::packet::ReassembledEventV2& packet, EventReassemblyAckInfo* info = nullptr) = 0;
 
 	virtual void SetAckDiagnosticsEnabled(bool enabled) = 0;
-
-#ifndef IS_FXSERVER
-	virtual void TriggerEvent(int target, std::string_view eventName, std::string_view eventPayload, int bytesPerSecond = 50000) = 0;
-#endif
 
 	virtual void TriggerEventV2(int target, std::string_view eventName, std::string_view eventPayload, int bytesPerSecond = 50000) = 0;
 

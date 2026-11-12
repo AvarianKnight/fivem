@@ -1,9 +1,11 @@
-﻿#include <StdInc.h>
+#include <StdInc.h>
 
 #include "packethandlers/RequestObjectIdsPacketHandler.h"
 
 #include "GameServer.h"
 #include "ResourceManager.h"
+
+#include <KeyedRateLimiter.h>
 
 #include <state/ServerGameStatePublic.h>
 
@@ -35,6 +37,17 @@ void SendObjectIdsToClient(const fx::ClientSharedPtr& client, const std::vector<
 
 bool RequestObjectIdsPacketHandler::Process(fx::ServerInstanceBase* instance, const fx::ClientSharedPtr& client, net::ByteReader& reader, fx::ENetPacketPtr& packet)
 {
+	static fx::RateLimiterStore<uint32_t, false> requestObjectIdsLimiterStore{ instance->GetComponent<console::Context>().GetRef() };
+	static auto requestObjectIdsRateLimiter = requestObjectIdsLimiterStore.GetRateLimiter(
+		"requestObjectIds", fx::RateLimiterDefaults{ 5.0f, 15.0f }
+	);
+
+	if (!requestObjectIdsRateLimiter->Consume(client->GetNetId()))
+	{
+		instance->GetComponent<fx::GameServer>()->DropClientWithReason(client, fx::serverDropResourceName, fx::ClientDropReason::SERVER_PACKET_OVERFLOW, "Reliable requestObjectIds overflow.");
+		return false;
+	}
+
 	gscomms_execute_callback_on_sync_thread([instance, client]
 	{
 		SendObjectIds(instance, client, fx::IsBigMode() ? 6 : 32);
@@ -49,6 +62,12 @@ void RequestObjectIdsPacketHandler::SendObjectIds(fx::ServerInstanceBase* instan
 	freeIds.reserve(numIds);
 	auto sgs = instance->GetComponent<fx::ServerGameStatePublic>();
 	sgs->GetFreeObjectIds(client, numIds, freeIds);
+
+	// GetFreeObjectIds can return 0 now, if it does then we don't need to reply
+	if (freeIds.size() == 0)
+	{
+		return;
+	}
 
 	if (fx::IsBigMode())
 	{

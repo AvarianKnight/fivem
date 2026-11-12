@@ -1,10 +1,14 @@
-﻿#pragma once
+#pragma once
 
 #include <ServerInstanceBase.h>
 
 #include <Client.h>
 
 #include <ServerTime.h>
+
+#include <KeyedRateLimiter.h>
+#include <GameServer.h>
+#include <ClientDropReasons.h>
 
 #include "ByteReader.h"
 #include "ByteWriter.h"
@@ -21,6 +25,20 @@ public:
 	template<typename Client = fx::ClientSharedPtr>
 	bool Process(fx::ServerInstanceBase* instance, const Client& client, net::ByteReader& reader, fx::ENetPacketPtr packet)
 	{
+		// tests also use this, don't enable this for tests
+		if constexpr (std::is_same_v<Client, fx::ClientSharedPtr>)
+		{
+			static fx::RateLimiterStore<uint32_t, false> timeSyncReqLimiterStore{ instance->GetComponent<console::Context>().GetRef() };
+			static auto timeSyncReqRateLimiter = timeSyncReqLimiterStore.GetRateLimiter(
+			"timeSyncReq", fx::RateLimiterDefaults{ 1.0f, 5.0f });
+
+			if (!timeSyncReqRateLimiter->Consume(client->GetNetId()))
+			{
+				instance->GetComponent<fx::GameServer>()->DropClientWithReason(client, fx::serverDropResourceName, fx::ClientDropReason::SERVER_PACKET_OVERFLOW, "Reliable timeSyncReq overflow.");
+				return false;
+			}
+		}
+
 		static size_t kMaxResponseSize = net::SerializableComponent::GetMaxSize<net::packet::TimeSyncResponsePacket>();
 		thread_local net::packet::TimeSyncResponsePacket timeSyncResponse;
 

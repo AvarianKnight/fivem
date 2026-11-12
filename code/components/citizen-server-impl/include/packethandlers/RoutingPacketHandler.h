@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "StdInc.h"
 
@@ -6,6 +6,8 @@
 
 #include <Client.h>
 #include <state/ServerGameStatePublic.h>
+
+#include <KeyedRateLimiter.h>
 
 #include "ByteReader.h"
 #include "Route.h"
@@ -20,6 +22,17 @@ public:
 
 	bool Process(fx::ServerInstanceBase* instance, const fx::ClientSharedPtr& client, net::ByteReader& reader, fx::ENetPacketPtr& packet)
 	{
+		static fx::RateLimiterStore<uint32_t, false> msgRouteLimiterStore{ instance->GetComponent<console::Context>().GetRef() };
+		static auto msgRouteRateLimitier = msgRouteLimiterStore.GetRateLimiter(
+			"msgRoute", fx::RateLimiterDefaults{ 200.f, 300.f }
+		);
+
+		if (!msgRouteRateLimitier->Consume(client->GetNetId()))
+		{
+			instance->GetComponent<fx::GameServer>()->DropClientWithReason(client, fx::serverDropResourceName, fx::ClientDropReason::SERVER_PACKET_OVERFLOW, "Reliable msgRoute overflow.");
+			return false;
+		}
+
 		return ProcessPacket(reader, [](net::packet::ClientRoute& clientRoute, fx::ServerInstanceBase* instance, const fx::ClientSharedPtr& client, fx::ENetPacketPtr& packet)
 		{
 			if (fx::IsOneSync())
