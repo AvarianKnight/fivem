@@ -465,15 +465,16 @@ bool UvTcpServerStream::Accept(std::shared_ptr<uvw::TCPHandle>&& client)
 			return;
 		}
 
-		if (thisRef->m_pendingWrites.fetch_sub(1) == 0)
+		if (thisRef->m_pendingWrites.fetch_sub(1) == 1)
 		{
 			thisRef->m_writeTimeout->stop();
 		}
 		else
 		{
 			thisRef->ResetWriteTimeout();
-			thisRef->ResetConnectionTimeout();
 		}
+
+		thisRef->ResetConnectionTimeout();
 	});
 
 	m_client->on<uvw::DataEvent>([thisRef](const uvw::DataEvent& event, uvw::TCPHandle& handle)
