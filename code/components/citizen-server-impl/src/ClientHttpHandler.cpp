@@ -45,6 +45,7 @@ namespace fx
 			{
 				auto endError = [=](const std::string& error)
 				{
+					response->SetStatusCode(400);
 					response->End(json::object({ {"error", error} }).dump(-1, ' ', false, json::error_handler_t::replace));
 				};
 
@@ -84,6 +85,11 @@ namespace fx
 								response->End();
 								return;
 							}
+							
+							if (data.is_object() && data.contains("error"))
+							{
+								response->SetStatusCode(403);
+							}
 
 							response->Write(data.dump(-1, ' ', false, json::error_handler_t::replace) + "\r\n");
 						});
@@ -96,6 +102,11 @@ namespace fx
 							{
 								response->End();
 								return;
+							}
+
+							if (data.IsObject() && data.HasMember("error"))
+							{
+								response->SetStatusCode(403);
 							}
 
 							rapidjson::StringBuffer sb;
