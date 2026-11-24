@@ -409,7 +409,13 @@ bool UvTcpServerStream::Accept(std::shared_ptr<uvw::TCPHandle>&& client)
 	sockaddr_storage addr;
 	int len = sizeof(addr);
 
-	uv_tcp_getpeername(client->raw(), reinterpret_cast<sockaddr*>(&addr), &len);
+	int uv_errno = uv_tcp_getpeername(client->raw(), reinterpret_cast<sockaddr*>(&addr), &len);
+
+	if (uv_errno != 0)
+	{
+		client->closeReset();
+		return false;
+	}
 
 	PeerAddress peer{ reinterpret_cast<sockaddr*>(&addr), static_cast<socklen_t>(len) };
 
@@ -550,7 +556,11 @@ PeerAddress UvTcpServerStream::GetPeerAddress()
 	sockaddr_storage addr;
 	int len = sizeof(addr);
 
-	uv_tcp_getpeername(client->raw(), reinterpret_cast<sockaddr*>(&addr), &len);
+	int uv_errno = uv_tcp_getpeername(client->raw(), reinterpret_cast<sockaddr*>(&addr), &len);
+	if (uv_errno != 0)
+	{
+		return PeerAddress{};
+	}
 
 	return PeerAddress(reinterpret_cast<sockaddr*>(&addr), static_cast<socklen_t>(len));
 }
