@@ -645,6 +645,9 @@ void HttpServerImpl::OnConnection(fwRefContainer<TcpServerStream> stream)
 				connectionData->request->SetCancelHandler();
 			}
 
+
+			// make sure that we don't keep our request alive on empty bodys
+			connectionData->request->SetDataHandler();
 			connectionData->request = nullptr;
 		}
 
