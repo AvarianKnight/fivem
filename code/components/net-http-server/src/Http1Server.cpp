@@ -249,7 +249,7 @@ public:
 			skipClose = true;
 		}
 
-		if (m_requestState->blocked)
+		if (m_requestState->blocked && !m_closeConnection)
 		{
 			decltype(m_requestState->ping) ping;
 
