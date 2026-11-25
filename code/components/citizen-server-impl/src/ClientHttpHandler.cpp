@@ -10,6 +10,7 @@
 #include <rapidjson/writer.h>
 
 #include <FormData.h>
+#include <SharedFunction.h>
 
 using json = nlohmann::json;
 
@@ -43,9 +44,9 @@ namespace fx
 
 			request->SetDataHandler([=](const std::vector<uint8_t>& postData)
 			{
-				auto endError = [=](const std::string& error)
+				auto endError = [=](const std::string& error, int errorCode = 400)
 				{
-					response->SetStatusCode(400);
+					response->SetStatusCode(errorCode);
 					response->End(json::object({ {"error", error} }).dump(-1, ' ', false, json::error_handler_t::replace));
 				};
 
@@ -135,7 +136,10 @@ namespace fx
 				if (g_threadedHttpVar->GetValue())
 				{
 					static tp::ThreadPool tg;
-					tg.post(runTask);
+					if (!tg.tryPost(make_shared_function(std::move(runTask))))
+					{
+						endError("server busy", 503);
+					}
 				}
 				else
 				{
