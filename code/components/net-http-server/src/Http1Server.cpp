@@ -352,14 +352,19 @@ void HttpServerImpl::OnConnection(fwRefContainer<TcpServerStream> stream)
 		auto& readQueue = connectionData->readBuffer;
 
 		size_t origSize = readQueue.size();
-		readQueue.resize(origSize + data.size());
+
+		size_t newSize = origSize + data.size();
 
 		// close the stream if the length is too big
-		if (readQueue.size() > (1024 * 1024 * 5))
+		if (newSize > (1024 * 1024 * 5))
 		{
+			localConnectionData->invalid = true;
+
 			stream->Close();
 			return;
 		}
+
+		readQueue.resize(newSize);
 
 		// actually copy
 		std::copy(data.begin(), data.end(), readQueue.begin() + origSize);
