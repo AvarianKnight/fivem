@@ -802,6 +802,7 @@ void UvTcpServerStream::Close()
 
 		CloseClient();
 
+		SetDrainCallback(TDrainCallback());
 		SetReadCallback(TReadCallback());
 
 		// get it locally as we may recurse
