@@ -595,6 +595,8 @@ void HttpServerImpl::OnConnection(fwRefContainer<TcpServerStream> stream)
 						{
 							request->SetDataHandler();
 
+							localConnectionData->lastLength += requestSize;
+
 							requestData.resize(localConnectionData->lastLength);
 
 							(*dataHandler)(requestData);
