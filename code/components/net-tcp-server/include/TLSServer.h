@@ -174,6 +174,11 @@ public:
 
 	void StartConnectionTimeout(std::chrono::duration<uint64_t, std::milli> timeout) override;
 
+	virtual bool HasPendingWrites() override
+	{
+		return m_baseStream.GetRef() && m_baseStream->HasPendingWrites();
+	}
+
 private:
 	void WriteToClient(const uint8_t buf[], size_t length);
 

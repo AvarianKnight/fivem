@@ -228,6 +228,13 @@ void TLSServerStream::Initialize()
 		});
 	}
 
+	m_baseStream->SetDrainCallback([=] {
+		if (auto drainCallback = GetDrainCallback())
+		{
+			drainCallback();
+		}
+	});
+
 	m_baseStream->SetReadCallback([=] (const std::vector<uint8_t>& data)
 	{
 		// keep a reference to the TLS server in case we close due to a TLS alert
@@ -378,6 +385,7 @@ void TLSServerStream::CloseInternal()
 		ourCloseCallback();
 	}
 
+	SetDrainCallback(TDrainCallback());
 	SetReadCallback(TReadCallback());
 
 	m_parentServer->CloseStream(this);

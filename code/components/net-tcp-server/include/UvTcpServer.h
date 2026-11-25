@@ -40,7 +40,7 @@ private:
 
 	std::shared_ptr<uvw::TimerHandle> m_connectionTimeoutTimer;
 
-	std::atomic<uint64_t> m_pendingWrites;
+	std::atomic<uint64_t> m_pendingWrites{ 0 };
 
 	std::shared_mutex m_writeCallbackMutex;
 
@@ -51,6 +51,8 @@ private:
 	std::thread::id m_threadId;
 
 	volatile bool m_closingClient;
+
+	bool m_readingPaused = false;
 
 	std::chrono::duration<uint64_t, std::milli> m_connectionTimeout { std::chrono::seconds { 5 } };
 
@@ -85,6 +87,11 @@ public:
 	virtual bool Release() override
 	{
 		return TcpServerStream::Release();
+	}
+
+	virtual bool HasPendingWrites() override
+	{
+		return m_client && m_client->writeQueueSize() > 0;
 	}
 
 public:

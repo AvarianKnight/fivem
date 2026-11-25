@@ -251,8 +251,6 @@ public:
 
 		if (m_requestState->blocked)
 		{
-			m_requestState->blocked = false;
-
 			decltype(m_requestState->ping) ping;
 
 			{
@@ -324,6 +322,8 @@ void HttpServerImpl::OnConnection(fwRefContainer<TcpServerStream> stream)
 
 		int pipelineLength;
 
+		bool waitingForDrain = false;
+
 		bool invalid;
 
 		HttpConnectionData()
@@ -380,6 +380,12 @@ void HttpServerImpl::OnConnection(fwRefContainer<TcpServerStream> stream)
 			{
 				if (reqState->blocked)
 				{
+					break;
+				}
+
+				if (stream->HasPendingWrites())
+				{
+					localConnectionData->waitingForDrain = !readQueue.empty();
 					break;
 				}
 
@@ -497,12 +503,6 @@ void HttpServerImpl::OnConnection(fwRefContainer<TcpServerStream> stream)
 			}
 			else if (connectionData->readState == ReadStateBody)
 			{
-				// skip if this is an empty write
-				if (data.empty())
-				{
-					break;
-				}
-
 				int contentLength = localConnectionData->contentLength;
 
 				if (readQueue.size() >= contentLength)
@@ -545,14 +545,14 @@ void HttpServerImpl::OnConnection(fwRefContainer<TcpServerStream> stream)
 			}
 			else if (connectionData->readState == ReadStateChunked)
 			{
-				// skip if this is an empty write
-				if (data.empty())
+				// append the remnant of the read queue to the vector
+				auto& requestData = localConnectionData->requestData;
+
+				// check that there hasn't been any new data sent
+				if (readQueue.size() == requestData.size())
 				{
 					break;
 				}
-
-				// append the remnant of the read queue to the vector
-				auto& requestData = localConnectionData->requestData;
 
 				size_t addedSize = readQueue.size() - requestData.size();
 				size_t oldSize = requestData.size();
@@ -618,8 +618,9 @@ void HttpServerImpl::OnConnection(fwRefContainer<TcpServerStream> stream)
 	{
 		std::unique_lock<std::mutex> lock(reqState->pingLock);
 
-		reqState->ping = [stream, readCallback]()
+		reqState->ping = [stream, readCallback, reqState]()
 		{
+			reqState->blocked = false;
 			if (readCallback)
 			{
 				stream->ScheduleCallback([readCallback]()
@@ -629,6 +630,14 @@ void HttpServerImpl::OnConnection(fwRefContainer<TcpServerStream> stream)
 			}
 		};
 	}
+
+	stream->SetDrainCallback([readCallback, connectionData] {
+		if (connectionData->waitingForDrain)
+		{
+			connectionData->waitingForDrain = false;
+			readCallback({ });
+		}
+	});
 
 	stream->SetReadCallback(readCallback);
 

@@ -11,6 +11,7 @@
 #include <function2.hpp>
 
 #include <shared_mutex>
+#include <optional>
 
 #ifdef COMPILING_NET_TCP_SERVER
 #define TCP_SERVER_EXPORT DLL_EXPORT
@@ -27,6 +28,8 @@ public:
 
 	typedef std::function<void()> TCloseCallback;
 
+	typedef std::function<void()> TDrainCallback;
+
 	typedef fu2::unique_function<void()> TScheduledCallback;
 
 	typedef fu2::unique_function<void(bool)> TCompleteCallback;
@@ -35,6 +38,8 @@ private:
 	TReadCallback m_readCallback;
 
 	TCloseCallback m_closeCallback;
+
+	TDrainCallback m_drainCallback;
 
 	std::shared_mutex m_cbMutex;
 
@@ -49,6 +54,12 @@ protected:
 	{
 		std::shared_lock<std::shared_mutex> _(m_cbMutex);
 		return m_closeCallback;
+	}
+
+	inline TDrainCallback GetDrainCallback()
+	{
+		std::shared_lock<std::shared_mutex> _(m_cbMutex);
+		return m_drainCallback;
 	}
 
 	virtual void OnFirstSetReadCallback() {}
@@ -72,9 +83,17 @@ public:
 
 	void SetCloseCallback(const TCloseCallback& callback);
 
+	void SetDrainCallback(const TDrainCallback& callback);
+
 	virtual void ScheduleCallback(TScheduledCallback&& callback, bool performInline = true);
 
 	virtual void StartConnectionTimeout(std::chrono::duration<uint64_t, std::milli> timeout) = 0;
+
+	virtual bool HasPendingWrites()
+	{
+		return false;
+	}
+
 protected:
 	TcpServerStream() { }
 };

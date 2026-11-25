@@ -72,6 +72,12 @@ void TcpServerStream::SetReadCallback(const TReadCallback& callback)
 	}
 }
 
+void TcpServerStream::SetDrainCallback(const TDrainCallback& callback)
+{
+	std::unique_lock<std::shared_mutex> _(m_cbMutex);
+	m_drainCallback = callback;
+}
+
 void TcpServerStream::ScheduleCallback(TScheduledCallback&& callback, bool performInline)
 {
 	callback();

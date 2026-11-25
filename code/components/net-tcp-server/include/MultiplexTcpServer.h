@@ -71,6 +71,12 @@ public:
 	virtual void ScheduleCallback(TScheduledCallback&& callback, bool performInline) override;
 
 	void StartConnectionTimeout(std::chrono::duration<uint64_t, std::milli> timeout) override;
+
+	virtual bool HasPendingWrites() override
+	{
+		auto bs = GetBaseStream();
+		return bs.GetRef() && bs->HasPendingWrites();
+	}
 };
 
 enum class MultiplexPatternMatchResult

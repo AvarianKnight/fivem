@@ -475,6 +475,21 @@ bool UvTcpServerStream::Accept(std::shared_ptr<uvw::TCPHandle>&& client)
 		}
 
 		thisRef->ResetConnectionTimeout();
+
+		if (!thisRef->HasPendingWrites())
+		{
+			if (auto drainCallback = thisRef->GetDrainCallback())
+			{
+				drainCallback();
+			}
+
+			// make sure we start reading if after our drain callback we don't have anymore pending writes.
+			if (thisRef->m_readingPaused && !thisRef->m_closingClient && !thisRef->HasPendingWrites())
+			{
+				thisRef->m_readingPaused = false;
+				handle.read();
+			}
+		}
 	});
 
 	m_client->on<uvw::DataEvent>([thisRef](const uvw::DataEvent& event, uvw::TCPHandle& handle)
@@ -531,9 +546,15 @@ void UvTcpServerStream::HandleRead(ssize_t nread, const std::unique_ptr<char[]>&
 		// timeout can be overwritten inside the read callback
 		ResetConnectionTimeout();
 
-		if (GetReadCallback())
+		if (auto cb = GetReadCallback())
 		{
-			GetReadCallback()(targetBuf);
+			cb(targetBuf);
+		}
+
+		if (m_client && !m_readingPaused && HasPendingWrites())
+		{
+			m_readingPaused = true;
+			m_client->stop();
 		}
 	}
 	else if (nread <= 0)

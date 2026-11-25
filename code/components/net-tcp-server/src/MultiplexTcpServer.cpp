@@ -143,6 +143,13 @@ void MultiplexTcpChildServer::SetPatternMatcher(const MultiplexPatternMatchFn& f
 MultiplexTcpChildServerStream::MultiplexTcpChildServerStream(MultiplexTcpChildServer* server, fwRefContainer<TcpServerStream> baseStream)
 	: m_baseStream(baseStream), m_server(server)
 {
+	baseStream->SetDrainCallback([=] {
+		if (auto drainCallback = GetDrainCallback())
+		{
+			drainCallback();
+		}
+	});
+
 	baseStream->SetReadCallback([=] (const std::vector<uint8_t>& data)
 	{
 		auto ourReadCallback = GetReadCallback();
@@ -195,6 +202,7 @@ void MultiplexTcpChildServerStream::CloseInternal()
 		ourCloseCallback();
 	}
 
+	SetDrainCallback(TDrainCallback());
 	SetReadCallback(TReadCallback());
 
 	m_server->CloseStream(this);
