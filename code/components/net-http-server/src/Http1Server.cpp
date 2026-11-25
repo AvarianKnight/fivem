@@ -394,9 +394,6 @@ void HttpServerImpl::OnConnection(fwRefContainer<TcpServerStream> stream)
 					break;
 				}
 
-				// increment the pipeline length, so we can close every 10 requests
-				localConnectionData->pipelineLength++;
-
 				// copy the deque into a vector for data purposes
 				std::vector<uint8_t> requestData(readQueue.begin(), readQueue.end());
 
@@ -420,6 +417,9 @@ void HttpServerImpl::OnConnection(fwRefContainer<TcpServerStream> stream)
 
 				if (result > 0)
 				{
+					// increment the pipeline length, so we can close every 10 requests
+					localConnectionData->pipelineLength++;
+
 					// prepare data for a request instance
 					HeaderString requestMethodStr(requestMethod, requestMethodLength);
 					HeaderString pathStr(path, pathLength);
